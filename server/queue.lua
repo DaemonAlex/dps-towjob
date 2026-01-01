@@ -249,8 +249,11 @@ end)
 -- Job completed
 RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
     local source = source
-    local job = ActiveJobs[source]
 
+    -- Anti-spam check
+    if CheckCooldown(source, 'completeJob') then return end
+
+    local job = ActiveJobs[source]
     if not job or job.id ~= jobId then return end
 
     job.state = TowJob.JobState.COMPLETED
@@ -262,6 +265,13 @@ RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
     local totalPayment = TowJob.CalculatePayment(distance, isPve)
     local driverCut, shopCut = TowJob.SplitPayment(totalPayment)
 
+    -- Bonus for high rating drivers (luxury tier unlocked at 120+)
+    local rating = GetDriverRating(source)
+    if rating >= 120 then
+        driverCut = math.floor(driverCut * 1.15) -- 15% bonus
+        totalPayment = driverCut + shopCut
+    end
+
     job.payment = {
         total = totalPayment,
         driver = driverCut,
@@ -272,10 +282,34 @@ RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
     -- Process payment
     TriggerEvent('dps-towjob:server:processPayment', source, job)
 
-    -- Update database
+    -- Update database with impound tracking
     MySQL.update.await([[
-        UPDATE tow_jobs SET state = ?, payment = ?, completed_at = NOW() WHERE id = ?
-    ]], { job.state, totalPayment, job.id })
+        UPDATE tow_jobs SET state = ?, payment = ?, completed_at = NOW(), dropoff_impound = ? WHERE id = ?
+    ]], {
+        job.state,
+        totalPayment,
+        job.destination and job.destination.type == TowJob.DestinationType.IMPOUND and job.destination.id or nil,
+        job.id
+    })
+
+    -- Update driver stats
+    local Player = QBCore.Functions.GetPlayer(source)
+    if Player then
+        local citizenid = Player.PlayerData.citizenid
+        local jobTypeColumn = job.type .. '_jobs'
+
+        MySQL.update.await([[
+            INSERT INTO tow_driver_stats (citizenid, total_jobs_completed, total_miles_driven, total_earned)
+            VALUES (?, 1, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                total_jobs_completed = total_jobs_completed + 1,
+                total_miles_driven = total_miles_driven + ?,
+                total_earned = total_earned + ?
+        ]], { citizenid, distance, driverCut, distance, driverCut })
+    end
+
+    -- Update reliability rating (+3 for completion, +2 bonus for damage-free)
+    UpdateDriverRating(source, 3, 'Job completed')
 
     -- Clear active job
     ActiveJobs[source] = nil
@@ -298,9 +332,32 @@ end)
 -- Cancel job
 RegisterNetEvent('dps-towjob:server:cancelJob', function(jobId, reason)
     local source = source
-    local job = ActiveJobs[source]
 
+    -- Anti-spam check
+    if CheckCooldown(source, 'cancelJob') then
+        lib.notify(source, {
+            title = 'Cooldown',
+            description = 'Please wait before cancelling again',
+            type = 'error'
+        })
+        return
+    end
+
+    local job = ActiveJobs[source]
     if not job or job.id ~= jobId then return end
+
+    -- Penalize rating for cancellation (-5 rating)
+    UpdateDriverRating(source, -5, 'Cancelled job')
+
+    -- Update cancelled jobs count
+    local Player = QBCore.Functions.GetPlayer(source)
+    if Player then
+        MySQL.update.await([[
+            INSERT INTO tow_driver_stats (citizenid, cancelled_jobs)
+            VALUES (?, 1)
+            ON DUPLICATE KEY UPDATE cancelled_jobs = cancelled_jobs + 1
+        ]], { Player.PlayerData.citizenid })
+    end
 
     -- Requeue job at original position
     job.state = TowJob.JobState.QUEUED
