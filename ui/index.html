@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DPS Tow Dispatch</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Dispatch Dashboard -->
+    <div id="dispatch-app" class="hidden">
+        <div class="dashboard">
+            <!-- Header -->
+            <div class="dashboard-header">
+                <div class="header-left">
+                    <div class="logo">
+                        <i class="fas fa-truck-ramp-box"></i>
+                        <span>Tow Dispatch</span>
+                    </div>
+                    <div class="duty-badge" id="duty-badge">
+                        <span class="duty-dot"></span>
+                        <span id="duty-status">On Duty</span>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <div class="stat-badge">
+                        <i class="fas fa-users"></i>
+                        <span id="driver-count">0</span>
+                        <span class="stat-label">Drivers</span>
+                    </div>
+                    <div class="stat-badge">
+                        <i class="fas fa-list-check"></i>
+                        <span id="queue-count">0</span>
+                        <span class="stat-label">In Queue</span>
+                    </div>
+                    <button class="close-btn" onclick="DispatchUI.close()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="dashboard-body">
+                <!-- Queue Panel -->
+                <div class="panel queue-panel">
+                    <div class="panel-header">
+                        <h3><i class="fas fa-clipboard-list"></i> Job Queue</h3>
+                        <div class="panel-actions">
+                            <button class="btn-icon" onclick="DispatchUI.refreshQueue()" title="Refresh">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="panel-content">
+                        <div class="queue-list" id="queue-list">
+                            <!-- Queue items populated here -->
+                        </div>
+                        <div class="empty-state hidden" id="empty-queue">
+                            <i class="fas fa-inbox"></i>
+                            <p>No pending jobs</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Jobs Panel -->
+                <div class="panel active-panel">
+                    <div class="panel-header">
+                        <h3><i class="fas fa-truck-moving"></i> Active Tows</h3>
+                    </div>
+                    <div class="panel-content">
+                        <div class="active-list" id="active-list">
+                            <!-- Active jobs populated here -->
+                        </div>
+                        <div class="empty-state hidden" id="empty-active">
+                            <i class="fas fa-road"></i>
+                            <p>No active tows</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Drivers Panel -->
+                <div class="panel drivers-panel">
+                    <div class="panel-header">
+                        <h3><i class="fas fa-id-badge"></i> Available Drivers</h3>
+                    </div>
+                    <div class="panel-content">
+                        <div class="driver-list" id="driver-list">
+                            <!-- Drivers populated here -->
+                        </div>
+                        <div class="empty-state hidden" id="empty-drivers">
+                            <i class="fas fa-user-slash"></i>
+                            <p>No drivers on duty</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Footer -->
+            <div class="dashboard-footer">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon success">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-completed">0</span>
+                            <span class="stat-label">Today's Tows</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon warning">
+                            <i class="fas fa-dollar-sign"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-earnings">$0</span>
+                            <span class="stat-label">Today's Earnings</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon info">
+                            <i class="fas fa-car-burst"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-pve">0</span>
+                            <span class="stat-label">NPC Breakdowns</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon danger">
+                            <i class="fas fa-parking"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-impound">0</span>
+                            <span class="stat-label">Impounded</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Job Detail Modal -->
+    <div id="job-modal" class="modal hidden">
+        <div class="modal-backdrop" onclick="DispatchUI.closeModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">Job Details</h2>
+                <button class="close-btn" onclick="DispatchUI.closeModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="job-details">
+                    <div class="detail-row">
+                        <span class="detail-label">Type</span>
+                        <span class="detail-value" id="modal-type">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Priority</span>
+                        <span class="detail-value" id="modal-priority">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Location</span>
+                        <span class="detail-value" id="modal-location">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Vehicle</span>
+                        <span class="detail-value" id="modal-vehicle">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Plate</span>
+                        <span class="detail-value" id="modal-plate">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Wait Time</span>
+                        <span class="detail-value" id="modal-wait">-</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-primary" id="modal-accept-btn" onclick="DispatchUI.acceptJob()">
+                    <i class="fas fa-check"></i> Accept Job
+                </button>
+                <button class="btn btn-secondary" onclick="DispatchUI.viewOnMap()">
+                    <i class="fas fa-map-marker-alt"></i> View on Map
+                </button>
+                <button class="btn btn-ghost" onclick="DispatchUI.closeModal()">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <script src="js/utils.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
