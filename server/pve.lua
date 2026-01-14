@@ -342,6 +342,50 @@ RegisterNetEvent('dps-towjob:server:disputeBonus', function(jobId, reason)
     TowJob.Debug('Dispute bonus paid:', source, bonus, reason)
 end)
 
+-- Settlement payment (NPC pays to keep their car)
+RegisterNetEvent('dps-towjob:server:settlementPaid', function(jobId, amount)
+    local source = source
+
+    -- Validate amount (anti-cheat)
+    if amount > 500 then
+        TowJob.Debug('Suspicious settlement amount:', source, amount)
+        amount = 200 -- Cap it
+    end
+
+    -- Pay the driver
+    Bridge.AddMoney(source, 'cash', amount)
+
+    -- Cancel the job (vehicle released)
+    local job = ActiveJobs and ActiveJobs[source]
+    if job and job.id == jobId then
+        -- Remove from active jobs
+        ActiveJobs[source] = nil
+
+        -- Update driver state
+        if DutyTracker and DutyTracker[source] then
+            DutyTracker[source].state = TowJob.DriverState.AVAILABLE
+        end
+
+        -- Update database - mark as settled
+        MySQL.update.await([[
+            UPDATE tow_jobs SET state = 'settled', payment = ? WHERE id = ?
+        ]], { amount, jobId })
+    end
+
+    -- Remove from PVE tracking
+    for pveId, data in pairs(ActivePVE.predatory) do
+        if data.jobId == jobId then
+            ActivePVE.predatory[pveId] = nil
+            break
+        end
+    end
+
+    TowJob.Debug('Settlement paid:', source, amount, jobId)
+
+    -- Check queue for next job
+    TriggerEvent('dps-towjob:server:checkQueue')
+end)
+
 -- Main PVE spawn loop
 if Config.Queue and Config.Queue.pveEnabled then
     CreateThread(function()
@@ -507,4 +551,176 @@ lib.callback.register('dps-towjob:server:getJobCoords', function(source, jobId)
         end
     end
     return nil
+end)
+
+-- ============================================
+-- POLICE INTEGRATION
+-- ============================================
+
+-- Track active disputes for police
+local ActiveDisputes = {}
+
+-- Police alert when NPC calls cops
+RegisterNetEvent('dps-towjob:server:policeAlert', function(data)
+    local source = source
+    local alertData = {
+        type = data.type or 'dispute',
+        reason = data.reason or 'Vehicle owner dispute',
+        coords = data.coords,
+        street = data.street or 'Unknown Location',
+        vehiclePlate = data.vehiclePlate,
+        reportedBy = 'Civilian',
+        towDriver = source,
+        timestamp = os.time()
+    }
+
+    -- Store for reference
+    local alertId = TowJob.GenerateId()
+    ActiveDisputes[alertId] = alertData
+
+    -- Try qs-dispatch integration first
+    if Bridge.Resources.dispatch then
+        TriggerEvent('qs-dispatch:server:CreateDispatchCall', {
+            job = 'police',
+            callLocation = data.coords,
+            callCode = { code = '10-10', flash = false },
+            message = 'Tow Truck Dispute',
+            description = data.reason .. ' at ' .. data.street,
+            units = {},
+            time = 10,
+            blip = {
+                sprite = 477,
+                scale = 1.0,
+                colour = 1,
+                flashes = true,
+                text = 'Dispute in Progress',
+                time = 120
+            }
+        })
+        TowJob.Debug('Police alert sent via qs-dispatch:', alertId)
+    else
+        -- Fallback: Alert all on-duty police manually
+        AlertPoliceUnits(alertData)
+    end
+
+    -- Log for records
+    TowJob.Debug('Police alert triggered:', alertId, data.reason)
+end)
+
+-- Alert police units (fallback when qs-dispatch not available)
+function AlertPoliceUnits(alertData)
+    local policeJobs = { 'police', 'bcso', 'sasp', 'sahp', 'lspd', 'sast' }
+
+    for _, playerId in ipairs(GetPlayers()) do
+        local src = tonumber(playerId)
+        local player = Bridge.GetPlayer(src)
+
+        if player then
+            local job = Bridge.GetPlayerJob(src)
+            local isPolice = false
+
+            for _, pJob in ipairs(policeJobs) do
+                if job == pJob then
+                    isPolice = true
+                    break
+                end
+            end
+
+            if isPolice then
+                -- Send notification
+                Bridge.Notify(src, '🚔 Dispatch', alertData.reason .. ' at ' .. alertData.street, 'inform', 10000)
+
+                -- Send blip coordinates
+                TriggerClientEvent('dps-towjob:client:policeBlip', src, {
+                    coords = alertData.coords,
+                    duration = 120000, -- 2 minutes
+                    sprite = 477,
+                    color = 1,
+                    label = 'Dispute - ' .. alertData.street
+                })
+            end
+        end
+    end
+end
+
+-- NPC started fighting notification
+RegisterNetEvent('dps-towjob:server:npcFighting', function(data)
+    local source = source
+    local coords = data.coords
+
+    -- Store fighting NPC info
+    local fightId = TowJob.GenerateId()
+    ActiveDisputes[fightId] = {
+        type = 'assault',
+        netId = data.netId,
+        coords = coords,
+        jobId = data.jobId,
+        towDriver = source,
+        timestamp = os.time()
+    }
+
+    TowJob.Debug('NPC fighting reported:', fightId, 'NetID:', data.netId)
+end)
+
+-- NPC arrested notification
+RegisterNetEvent('dps-towjob:server:npcArrested', function(data)
+    local source = source
+
+    -- Find and remove from active disputes
+    for id, dispute in pairs(ActiveDisputes) do
+        if dispute.netId == data.netId then
+            ActiveDisputes[id] = nil
+
+            -- Log arrest in database
+            MySQL.insert.await([[
+                INSERT INTO tow_dispute_logs (job_id, outcome, officer_source, resolved_at)
+                VALUES (?, 'arrested', ?, NOW())
+            ]], { data.jobId or 'unknown', source })
+
+            TowJob.Debug('NPC arrested by officer:', source, 'Dispute:', id)
+            break
+        end
+    end
+
+    -- Notify the tow driver if different from arresting officer
+    local driver = nil
+    for id, dispute in pairs(ActiveDisputes) do
+        if dispute.jobId == data.jobId then
+            driver = dispute.towDriver
+            break
+        end
+    end
+
+    if driver and driver ~= source then
+        Bridge.Notify(driver, '🚔 Police', 'The suspect has been arrested', 'success')
+    end
+end)
+
+-- Client event for police blip
+-- This should be registered on client side, but adding the handler pattern here
+AddEventHandler('dps-towjob:server:requestPoliceBlip', function(src, coords)
+    TriggerClientEvent('dps-towjob:client:policeBlip', src, {
+        coords = coords,
+        duration = 120000,
+        sprite = 477,
+        color = 1,
+        label = 'Active Dispute'
+    })
+end)
+
+-- Cleanup old disputes periodically
+CreateThread(function()
+    while true do
+        Wait(300000) -- Every 5 minutes
+
+        local now = os.time()
+        local maxAge = 600 -- 10 minutes
+
+        for id, dispute in pairs(ActiveDisputes) do
+            if now - dispute.timestamp > maxAge then
+                ActiveDisputes[id] = nil
+                TowJob.Debug('Cleaned up old dispute:', id)
+            end
+        end
+    end
 end)

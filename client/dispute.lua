@@ -71,6 +71,33 @@ local DisputeConfig = {
                 "Keep your money! I want my car!",
             }
         },
+        -- NPC offers to pay release fee
+        settlement = {
+            offering = {
+                "Look, how much to just... forget about this?",
+                "What if I pay the fine right now? Cash.",
+                "Can we work something out here? Name your price.",
+                "I'll pay double the ticket, just leave my car!",
+                "Come on man, I'll make it worth your while...",
+            },
+            playerAccepts = {
+                "Thank god. Here, take it. We're done here.",
+                "*hands over cash* Pleasure doing business.",
+                "Fine, fine. Here's your money. Happy now?",
+                "Alright, deal. *counts out bills*",
+            },
+            playerRefuses = {
+                "Are you kidding me?! That's robbery!",
+                "Forget it then! Take the damn car!",
+                "Unbelievable... you people are vultures!",
+                "Fine! But I'm reporting this!",
+            },
+            lowball = {
+                "That's all I got, take it or leave it.",
+                "I don't have that much on me...",
+                "Best I can do. Times are tough.",
+            }
+        },
         -- When player ignores them
         ignored = {
             angry = {
@@ -90,6 +117,20 @@ local DisputeConfig = {
             "I'm gonna make you regret that!",
             "Let's go then!",
             "You messed with the wrong person!",
+        },
+        -- Calling cops lines
+        callingCops = {
+            "That's it, I'm calling the cops!",
+            "You're gonna regret this! *dials 911*",
+            "Police?! Yes, I need help immediately!",
+            "I'm reporting you right now!",
+            "*on phone* There's a tow truck stealing my car!",
+        },
+        copsArriving = {
+            "The cops are on their way, buddy!",
+            "You're in trouble now!",
+            "Let's see what the police have to say!",
+            "Good luck explaining this to the cops!",
         }
     }
 }
@@ -141,6 +182,61 @@ end
 
 -- Active dispute tracking
 local ActiveDispute = nil
+local CopsCalledRecently = false
+
+-- Call the cops (alert police players)
+function CallCops(reason)
+    if not ActiveDispute or CopsCalledRecently then return end
+
+    CopsCalledRecently = true
+    local ped = ActiveDispute.ped
+    local coords = GetEntityCoords(ped)
+
+    -- Show calling dialogue
+    local callLine = GetDialogue('callingCops')
+    ShowNPCDialogue(ped, callLine, 4000)
+
+    -- Phone animation
+    lib.requestAnimDict('cellphone@')
+    TaskPlayAnim(ped, 'cellphone@', 'cellphone_call_listen_base', 8.0, -8.0, 5000, 49, 0, false, false, false)
+
+    Wait(3000)
+
+    -- Trigger police alert (server handles dispatch)
+    TriggerServerEvent('dps-towjob:server:policeAlert', {
+        type = 'dispute',
+        reason = reason or 'Vehicle owner dispute',
+        coords = coords,
+        street = GetStreetName(coords),
+        vehiclePlate = ActiveDispute.vehiclePlate or 'Unknown'
+    })
+
+    -- Clear animation
+    ClearPedTasks(ped)
+
+    -- Show cops arriving line
+    Wait(2000)
+    local arriveLine = GetDialogue('copsArriving')
+    ShowNPCDialogue(ped, arriveLine, 3000)
+
+    Bridge.Notify('🚔 Police Called!', 'Cops are on the way!', 'error', 5000)
+
+    -- Reset after cooldown
+    SetTimeout(60000, function()
+        CopsCalledRecently = false
+    end)
+end
+
+-- Get street name from coords
+function GetStreetName(coords)
+    local streetHash, crossingHash = GetStreetNameAtCoord(coords.x, coords.y, coords.z)
+    local streetName = GetStreetNameFromHashKey(streetHash)
+    local crossing = GetStreetNameFromHashKey(crossingHash)
+    if crossing and crossing ~= '' then
+        return streetName .. ' / ' .. crossing
+    end
+    return streetName
+end
 
 -- Check for dispute when hooking predatory vehicle
 function CheckForDispute(jobData)
@@ -298,6 +394,22 @@ function StartConfrontation()
 
     Wait(1000)
 
+    -- Calculate settlement fee (what NPC offers to pay)
+    -- Higher than commission but lower than full tow value
+    local baseCommission = ActiveDispute.commission or 75
+    local settlementFee = math.floor(baseCommission * (1.5 + math.random() * 0.5)) -- 150-200% of commission
+    ActiveDispute.settlementFee = settlementFee
+
+    -- 40% chance NPC offers settlement first
+    local npcOffersSettlement = math.random() < 0.40
+
+    if npcOffersSettlement then
+        -- NPC makes the first offer
+        local offerLine = GetDialogue('settlement', 'offering')
+        ShowNPCDialogue(ped, offerLine, 3500)
+        Wait(3500)
+    end
+
     -- Show options menu
     local options = {
         {
@@ -309,11 +421,19 @@ function StartConfrontation()
             end
         },
         {
-            title = '💰 Offer bribe ($' .. ActiveDispute.bribeAmount .. ')',
-            description = 'Pay them to look the other way',
-            icon = 'money-bill',
+            title = '💵 Accept settlement ($' .. settlementFee .. ')',
+            description = 'Let them pay to keep their car',
+            icon = 'hand-holding-dollar',
             onSelect = function()
-                AttemptBribe()
+                AcceptSettlement()
+            end
+        },
+        {
+            title = '💰 Counter-offer ($' .. math.floor(settlementFee * 1.5) .. ')',
+            description = 'Demand more money',
+            icon = 'money-bill-trend-up',
+            onSelect = function()
+                CounterOffer()
             end
         },
         {
@@ -326,7 +446,7 @@ function StartConfrontation()
         },
         {
             title = '❌ Abandon job',
-            description = 'Leave the vehicle alone',
+            description = 'Leave the vehicle alone (no pay)',
             icon = 'ban',
             onSelect = function()
                 AbandonJob()
@@ -341,6 +461,125 @@ function StartConfrontation()
     })
 
     lib.showContext('tow_dispute_menu')
+end
+
+-- Accept the NPC's settlement offer
+function AcceptSettlement()
+    if not ActiveDispute then return end
+
+    local ped = ActiveDispute.ped
+    local fee = ActiveDispute.settlementFee
+
+    -- NPC pays the settlement
+    local acceptLine = GetDialogue('settlement', 'playerAccepts')
+    ShowNPCDialogue(ped, acceptLine, 3000)
+    PlayAmbientSpeech1(ped, 'GENERIC_THANKS', 'SPEECH_PARAMS_FORCE')
+
+    -- Player receives payment
+    TriggerServerEvent('dps-towjob:server:settlementPaid', ActiveDispute.jobId, fee)
+
+    Bridge.Notify('Settlement Accepted', 'You received $' .. fee .. ' - Vehicle released', 'success')
+
+    Wait(2000)
+    ResolveDispute('settlement_accepted')
+end
+
+-- Counter-offer for more money
+function CounterOffer()
+    if not ActiveDispute then return end
+
+    local ped = ActiveDispute.ped
+    local counterAmount = math.floor(ActiveDispute.settlementFee * 1.5)
+
+    Bridge.Notify('Negotiating', 'Demanding $' .. counterAmount .. '...', 'inform')
+
+    -- 50% chance they accept, 30% lowball, 20% refuse
+    local roll = math.random()
+
+    Wait(2000)
+
+    if roll < 0.50 then
+        -- They accept the higher price (reluctantly)
+        local grumbleLine = "*sighs heavily* Fine... highway robbery, but fine."
+        ShowNPCDialogue(ped, grumbleLine, 3000)
+        PlayAmbientSpeech1(ped, 'GENERIC_CURSE_MED', 'SPEECH_PARAMS_FORCE')
+
+        TriggerServerEvent('dps-towjob:server:settlementPaid', ActiveDispute.jobId, counterAmount)
+
+        Bridge.Notify('Counter Accepted!', 'You received $' .. counterAmount, 'success')
+
+        Wait(2000)
+        ResolveDispute('counter_accepted')
+
+    elseif roll < 0.80 then
+        -- They lowball - offer less
+        local lowballAmount = math.floor(ActiveDispute.settlementFee * 0.75)
+        local lowballLine = GetDialogue('settlement', 'lowball')
+        ShowNPCDialogue(ped, lowballLine, 3000)
+
+        Wait(2500)
+
+        -- Show accept/refuse for lowball
+        local options = {
+            {
+                title = '✅ Accept $' .. lowballAmount,
+                description = 'Take the lower offer',
+                icon = 'check',
+                onSelect = function()
+                    local acceptLine = GetDialogue('settlement', 'playerAccepts')
+                    ShowNPCDialogue(ped, acceptLine, 2000)
+                    TriggerServerEvent('dps-towjob:server:settlementPaid', ActiveDispute.jobId, lowballAmount)
+                    Bridge.Notify('Deal', 'You received $' .. lowballAmount, 'success')
+                    Wait(1500)
+                    ResolveDispute('lowball_accepted')
+                end
+            },
+            {
+                title = '❌ Refuse and tow',
+                description = 'Continue with the tow',
+                icon = 'xmark',
+                onSelect = function()
+                    local refuseLine = GetDialogue('settlement', 'playerRefuses')
+                    ShowNPCDialogue(ped, refuseLine, 2500)
+                    PlayAmbientSpeech1(ped, 'GENERIC_CURSE_HIGH', 'SPEECH_PARAMS_FORCE_SHOUTED')
+                    Bridge.Notify('Refused', 'Continuing with the tow...', 'inform')
+                    Wait(2000)
+                    if ActiveDispute.isFight and math.random() < 0.5 then
+                        StartFight()
+                    else
+                        ResolveDispute('refused_lowball')
+                    end
+                end
+            }
+        }
+
+        lib.registerContext({
+            id = 'tow_lowball_menu',
+            title = '💸 Counter Offer',
+            options = options
+        })
+
+        lib.showContext('tow_lowball_menu')
+
+    else
+        -- They refuse entirely and get mad
+        local refuseLine = GetDialogue('settlement', 'playerRefuses')
+        ShowNPCDialogue(ped, refuseLine, 3000)
+        PlayAmbientSpeech1(ped, 'GENERIC_CURSE_HIGH', 'SPEECH_PARAMS_FORCE_SHOUTED')
+
+        Bridge.Notify('Refused!', 'They won\'t pay that much!', 'error')
+
+        Wait(2000)
+
+        if ActiveDispute.isFight then
+            StartFight()
+        else
+            local defeatLine = GetDialogue('ignored', 'defeated')
+            ShowNPCDialogue(ped, defeatLine, 2500)
+            Wait(2500)
+            ResolveDispute('counter_refused')
+        end
+    end
 end
 
 -- Attempt to talk down the owner
@@ -455,6 +694,14 @@ function StartFight()
     local ped = ActiveDispute.ped
     local playerPed = PlayerPedId()
 
+    -- 40% chance NPC calls cops before/during fight
+    if math.random() < 0.40 then
+        CreateThread(function()
+            Wait(math.random(2000, 5000))
+            CallCops('Assault during vehicle dispute')
+        end)
+    end
+
     -- Show fight dialogue
     local fightLine = GetDialogue('fight')
     ShowNPCDialogue(ped, fightLine, 2000)
@@ -466,6 +713,9 @@ function StartFight()
     local weapon = weapons[math.random(#weapons)]
     GiveWeaponToPed(ped, GetHashKey(weapon), 1, false, true)
 
+    -- Make NPC arrestable by police via ox_target
+    MakeNPCArrestable(ped)
+
     -- Make them fight
     SetPedCombatAttributes(ped, 46, true) -- Can fight armed peds
     SetPedCombatAttributes(ped, 5, true)  -- Can leave cover
@@ -473,7 +723,132 @@ function StartFight()
 
     -- Play war cry
     PlayAmbientSpeech1(ped, 'GENERIC_WAR_CRY', 'SPEECH_PARAMS_FORCE_SHOUTED')
+
+    -- Tell server NPC is fighting (for police records)
+    TriggerServerEvent('dps-towjob:server:npcFighting', {
+        netId = NetworkGetNetworkIdFromEntity(ped),
+        coords = GetEntityCoords(ped),
+        jobId = ActiveDispute.jobId
+    })
 end
+
+-- Make NPC targetable/arrestable by police
+function MakeNPCArrestable(ped)
+    if not DoesEntityExist(ped) then return end
+
+    -- Set entity state for police to identify
+    local netId = NetworkGetNetworkIdFromEntity(ped)
+    if netId and netId > 0 then
+        Entity(ped).state:set('isTowDispute', true, true)
+        Entity(ped).state:set('canArrest', true, true)
+    end
+
+    -- Add ox_target options for police
+    exports.ox_target:addLocalEntity(ped, {
+        {
+            name = 'arrest_dispute_npc',
+            icon = 'fas fa-handcuffs',
+            label = 'Arrest Suspect',
+            distance = 2.5,
+            groups = { 'police', 'bcso', 'sasp', 'sahp', 'lspd', 'sast' },
+            onSelect = function()
+                TriggerEvent('dps-towjob:client:policeArrest', ped)
+            end
+        },
+        {
+            name = 'detain_dispute_npc',
+            icon = 'fas fa-user-lock',
+            label = 'Detain Suspect',
+            distance = 2.5,
+            groups = { 'police', 'bcso', 'sasp', 'sahp', 'lspd', 'sast' },
+            onSelect = function()
+                TriggerEvent('dps-towjob:client:policeDetain', ped)
+            end
+        },
+        {
+            name = 'question_dispute_npc',
+            icon = 'fas fa-comments',
+            label = 'Question Suspect',
+            distance = 3.0,
+            groups = { 'police', 'bcso', 'sasp', 'sahp', 'lspd', 'sast' },
+            onSelect = function()
+                TriggerEvent('dps-towjob:client:policeQuestion', ped)
+            end
+        }
+    })
+
+    TowJob.Debug('NPC marked as arrestable, NetID:', netId)
+end
+
+-- Police arrest event
+RegisterNetEvent('dps-towjob:client:policeArrest', function(ped)
+    if not DoesEntityExist(ped) then return end
+
+    -- Check if player is police
+    if not Bridge.HasJob('police') and not Bridge.HasJob('bcso') and not Bridge.HasJob('sasp') and not Bridge.HasJob('sahp') and not Bridge.HasJob('lspd') and not Bridge.HasJob('sast') then
+        Bridge.Notify('Error', 'You are not authorized', 'error')
+        return
+    end
+
+    -- Make NPC surrender
+    ClearPedTasks(ped)
+    SetBlockingOfNonTemporaryEvents(ped, true)
+    TaskSetBlockingOfNonTemporaryEvents(ped, true)
+
+    -- Hands up animation
+    lib.requestAnimDict('missminuteman_1ig_2')
+    TaskPlayAnim(ped, 'missminuteman_1ig_2', 'handsup_base', 8.0, -8.0, -1, 49, 0, false, false, false)
+
+    Bridge.Notify('Arrest', 'Suspect apprehended', 'success')
+
+    -- Notify server
+    TriggerServerEvent('dps-towjob:server:npcArrested', {
+        netId = NetworkGetNetworkIdFromEntity(ped),
+        jobId = ActiveDispute and ActiveDispute.jobId or nil
+    })
+
+    -- Resolve dispute if active
+    if ActiveDispute and ActiveDispute.ped == ped then
+        Wait(3000)
+        Bridge.Notify('Dispute', 'Police handled the situation', 'success')
+        ResolveDispute('police_arrest')
+    end
+end)
+
+-- Police detain event
+RegisterNetEvent('dps-towjob:client:policeDetain', function(ped)
+    if not DoesEntityExist(ped) then return end
+
+    -- Make NPC stop fighting and kneel
+    ClearPedTasks(ped)
+    SetBlockingOfNonTemporaryEvents(ped, true)
+
+    -- Kneel animation
+    lib.requestAnimDict('random@arrests')
+    TaskPlayAnim(ped, 'random@arrests', 'kneeling_arrest_idle', 8.0, -8.0, -1, 1, 0, false, false, false)
+
+    Bridge.Notify('Detained', 'Suspect is detained', 'inform')
+end)
+
+-- Police question event
+RegisterNetEvent('dps-towjob:client:policeQuestion', function(ped)
+    if not DoesEntityExist(ped) then return end
+
+    -- Play ambient speech
+    local responses = {
+        "It's MY car! That tow truck driver is stealing it!",
+        "I only parked there for a second!",
+        "This is harassment! I want a lawyer!",
+        "He started it, officer! I was just protecting my property!",
+        "I'll sue this whole city!",
+    }
+
+    local response = responses[math.random(#responses)]
+    ShowNPCDialogue(ped, response, 4000)
+    PlayAmbientSpeech1(ped, 'GENERIC_CURSE_MED', 'SPEECH_PARAMS_FORCE')
+
+    Bridge.Notify('Response', response, 'inform', 4000)
+end)
 
 -- Abandon the job
 function AbandonJob()
@@ -528,3 +903,41 @@ end)
 -- Export for towing.lua to check
 exports('CheckForDispute', CheckForDispute)
 exports('IsInDispute', function() return ActiveDispute ~= nil end)
+
+-- ============================================
+-- POLICE BLIP HANDLER
+-- ============================================
+
+-- Police receive blip for active disputes
+RegisterNetEvent('dps-towjob:client:policeBlip', function(data)
+    if not data or not data.coords then return end
+
+    -- Create blip
+    local blip = AddBlipForCoord(data.coords.x, data.coords.y, data.coords.z)
+    SetBlipSprite(blip, data.sprite or 477)
+    SetBlipColour(blip, data.color or 1)
+    SetBlipScale(blip, 1.0)
+    SetBlipFlashes(blip, true)
+    SetBlipAsShortRange(blip, false)
+    BeginTextCommandSetBlipName('STRING')
+    AddTextComponentString(data.label or 'Dispute in Progress')
+    EndTextCommandSetBlipName(blip)
+
+    -- Set waypoint automatically
+    SetNewWaypoint(data.coords.x, data.coords.y)
+
+    -- Remove after duration
+    local duration = data.duration or 120000
+    SetTimeout(duration, function()
+        if DoesBlipExist(blip) then
+            RemoveBlip(blip)
+        end
+    end)
+
+    -- Stop flashing after 30 seconds
+    SetTimeout(30000, function()
+        if DoesBlipExist(blip) then
+            SetBlipFlashes(blip, false)
+        end
+    end)
+end)

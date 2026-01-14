@@ -98,3 +98,18 @@ CREATE TABLE IF NOT EXISTS `tow_driver_stats` (
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Dispute logs (predatory towing confrontations)
+CREATE TABLE IF NOT EXISTS `tow_dispute_logs` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `job_id` VARCHAR(20) NOT NULL,
+    `driver_id` VARCHAR(50) NULL COMMENT 'citizenid of tow driver',
+    `outcome` ENUM('talked_down', 'bribed', 'settlement', 'fought', 'abandoned', 'arrested', 'fled', 'timeout') NOT NULL,
+    `settlement_amount` INT DEFAULT 0,
+    `officer_source` INT NULL COMMENT 'Server ID of arresting officer',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `resolved_at` TIMESTAMP NULL,
+    INDEX `idx_job_id` (`job_id`),
+    INDEX `idx_driver_id` (`driver_id`),
+    INDEX `idx_outcome` (`outcome`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
