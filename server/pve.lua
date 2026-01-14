@@ -23,6 +23,14 @@ local PVEConfig = {
             ['downtown'] = 1.5,
             ['airport'] = 2.0,
             ['casino'] = 1.75,
+        },
+        -- NPC Dispute system - angry owners!
+        dispute = {
+            enabled = true,
+            chance = 0.15,          -- 15% chance of angry owner
+            fightChance = 0.30,     -- 30% of disputes turn violent
+            bribeRange = { 50, 150 }, -- Bribe amount range
+            bonusOnSuccess = 25,    -- Extra $ if you handle dispute
         }
     },
 
@@ -247,6 +255,91 @@ RegisterNetEvent('dps-towjob:server:pveCompleted', function(pveId, pveType)
     elseif pveType == 'predatory' then
         ActivePVE.predatory[pveId] = nil
     end
+end)
+
+-- ============================================
+-- DISPUTE SYSTEM
+-- ============================================
+
+-- Check if dispute should trigger for predatory tow
+lib.callback.register('dps-towjob:server:checkDispute', function(source, jobId)
+    if not PVEConfig.predatory.dispute.enabled then
+        return { triggered = false }
+    end
+
+    -- Find the job
+    local job = nil
+    for _, j in ipairs(TowQueue or {}) do
+        if j.id == jobId and j.type == 'predatory' then
+            job = j
+            break
+        end
+    end
+
+    if not job then
+        job = ActiveJobs and ActiveJobs[source]
+    end
+
+    if not job or job.type ~= 'predatory' then
+        return { triggered = false }
+    end
+
+    -- Roll for dispute
+    local disputeChance = PVEConfig.predatory.dispute.chance
+    local triggered = math.random() < disputeChance
+
+    if not triggered then
+        return { triggered = false }
+    end
+
+    -- Determine if fight will happen
+    local willFight = math.random() < PVEConfig.predatory.dispute.fightChance
+
+    -- Generate bribe amount
+    local bribeMin = PVEConfig.predatory.dispute.bribeRange[1]
+    local bribeMax = PVEConfig.predatory.dispute.bribeRange[2]
+    local bribeAmount = math.random(bribeMin, bribeMax)
+
+    TowJob.Debug('Dispute triggered for job:', jobId, 'willFight:', willFight)
+
+    return {
+        triggered = true,
+        willFight = willFight,
+        bribeAmount = bribeAmount
+    }
+end)
+
+-- Check if player has money for bribe
+lib.callback.register('dps-towjob:server:checkMoney', function(source, amount)
+    return Bridge.GetMoney(source, 'cash') >= amount or Bridge.GetMoney(source, 'bank') >= amount
+end)
+
+-- Pay bribe to angry owner
+RegisterNetEvent('dps-towjob:server:payBribe', function(jobId, amount)
+    local source = source
+
+    -- Try cash first, then bank
+    if Bridge.GetMoney(source, 'cash') >= amount then
+        Bridge.RemoveMoney(source, 'cash', amount)
+    elseif Bridge.GetMoney(source, 'bank') >= amount then
+        Bridge.RemoveMoney(source, 'bank', amount)
+    else
+        Bridge.Notify(source, 'Dispute', 'Insufficient funds', 'error')
+        return
+    end
+
+    TowJob.Debug('Player paid bribe:', source, amount)
+end)
+
+-- Dispute bonus payment
+RegisterNetEvent('dps-towjob:server:disputeBonus', function(jobId, reason)
+    local source = source
+    local bonus = PVEConfig.predatory.dispute.bonusOnSuccess or 25
+
+    -- Add bonus to earnings
+    Bridge.AddMoney(source, 'cash', bonus)
+
+    TowJob.Debug('Dispute bonus paid:', source, bonus, reason)
 end)
 
 -- Main PVE spawn loop
