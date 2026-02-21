@@ -82,7 +82,7 @@ exports('RequestTow', function(source, coords, towType, priority)
 end)
 
 -- Check queue for available assignments
-RegisterNetEvent('dps-towjob:server:checkQueue', function()
+AddEventHandler('dps-towjob:server:checkQueue', function()
     if #TowQueue == 0 then return end
 
     local availableDrivers = GetAvailableDrivers()
@@ -461,46 +461,4 @@ exports('GetShopWaitTime', function(shopId)
     return os.time() - waitTime
 end)
 
--- PVE job spawning
-if Config.Queue.pveEnabled then
-    CreateThread(function()
-        while true do
-            Wait(Config.Queue.pveInterval)
-
-            -- Count active PVE jobs
-            local pveCount = 0
-            for _, job in pairs(ActiveJobs) do
-                if job.type == TowJob.JobTypes.PVE then
-                    pveCount = pveCount + 1
-                end
-            end
-            for _, job in ipairs(TowQueue) do
-                if job.type == TowJob.JobTypes.PVE then
-                    pveCount = pveCount + 1
-                end
-            end
-
-            -- Spawn PVE if under limit and drivers available
-            if pveCount < Config.Queue.maxPveActive and #GetAvailableDrivers() > 0 then
-                -- Generate random PVE location
-                local pveLocations = {
-                    vector3(-200.0, -1000.0, 29.0),
-                    vector3(400.0, -1200.0, 29.0),
-                    vector3(-500.0, -300.0, 35.0),
-                    vector3(100.0, -700.0, 31.0),
-                }
-
-                local coords = pveLocations[math.random(#pveLocations)]
-
-                AddToQueue({
-                    type = TowJob.JobTypes.PVE,
-                    coords = coords,
-                    requesterId = 'SYSTEM',
-                    requesterSource = nil
-                })
-
-                TowJob.Debug('PVE job spawned')
-            end
-        end
-    end)
-end
+-- PVE job spawning handled by server/pve.lua (SpawnBreakdown + SpawnPredatoryTow)

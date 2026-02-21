@@ -1,6 +1,8 @@
 --[[
     dps-towjob Database Schema
-    Run this SQL to create required tables
+    These tables are auto-created on resource start via server/main.lua.
+    This file serves as reference documentation.
+    The tow_dispute_logs table must be created manually if not already present.
 ]]
 
 -- Tow jobs table (main job tracking)
@@ -10,6 +12,7 @@ CREATE TABLE IF NOT EXISTS `tow_jobs` (
     `priority` INT DEFAULT 2 COMMENT '1=low, 2=normal, 3=high',
     `pickup_coords` VARCHAR(100) NOT NULL,
     `dropoff_coords` VARCHAR(100) DEFAULT NULL,
+    `dropoff_impound` VARCHAR(50) DEFAULT NULL,
     `vehicle_plate` VARCHAR(10) DEFAULT NULL,
     `vehicle_model` VARCHAR(50) DEFAULT NULL,
     `requester_id` VARCHAR(50) DEFAULT NULL COMMENT 'citizenid of requester',
@@ -17,13 +20,13 @@ CREATE TABLE IF NOT EXISTS `tow_jobs` (
     `shop_id` VARCHAR(50) DEFAULT NULL COMMENT 'Shop that driver is assigned to',
     `state` VARCHAR(20) DEFAULT 'queued' COMMENT 'queued, assigned, en_route, on_scene, towing, completed, cancelled',
     `payment` INT DEFAULT 0,
+    `damage_on_pickup` INT DEFAULT 0,
+    `damage_on_dropoff` INT DEFAULT 0,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `assigned_at` TIMESTAMP NULL,
     `completed_at` TIMESTAMP NULL,
-    INDEX `idx_state` (`state`),
-    INDEX `idx_driver_id` (`driver_id`),
-    INDEX `idx_created_at` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    INDEX `state` (`state`),
+    INDEX `driver_id` (`driver_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Service tickets for repair handoffs
 CREATE TABLE IF NOT EXISTS `tow_service_tickets` (
@@ -37,10 +40,9 @@ CREATE TABLE IF NOT EXISTS `tow_service_tickets` (
     `towed_by` VARCHAR(50) NOT NULL COMMENT 'citizenid of tow driver',
     `repaired_by` VARCHAR(50) NULL COMMENT 'citizenid of mechanic',
     `repair_cost` INT DEFAULT 0,
-    INDEX `idx_shop` (`shop`),
-    INDEX `idx_status` (`status`),
-    INDEX `idx_created_at` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    INDEX `shop` (`shop`),
+    INDEX `status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Shop transaction log
 CREATE TABLE IF NOT EXISTS `tow_shop_transactions` (
@@ -51,10 +53,9 @@ CREATE TABLE IF NOT EXISTS `tow_shop_transactions` (
     `description` VARCHAR(255) DEFAULT NULL,
     `citizenid` VARCHAR(50) NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX `idx_shop` (`shop`),
-    INDEX `idx_type` (`type`),
-    INDEX `idx_created_at` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    INDEX `shop` (`shop`),
+    INDEX `created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Driver earnings tracking
 CREATE TABLE IF NOT EXISTS `tow_driver_earnings` (
@@ -63,25 +64,8 @@ CREATE TABLE IF NOT EXISTS `tow_driver_earnings` (
     `total_earned` INT DEFAULT 0,
     `uncollected` INT DEFAULT 0 COMMENT 'Amount waiting to be collected',
     `total_jobs` INT DEFAULT 0,
-    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX `idx_shop` (`shop`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Impound tracking (links to player_vehicles)
-CREATE TABLE IF NOT EXISTS `tow_impound_log` (
-    `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `plate` VARCHAR(10) NOT NULL,
-    `impound_lot` VARCHAR(50) NOT NULL,
-    `towed_by` VARCHAR(50) NOT NULL COMMENT 'citizenid of tow driver',
-    `reason` VARCHAR(255) DEFAULT NULL,
-    `fee` INT DEFAULT 0,
-    `impounded_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `released_at` TIMESTAMP NULL,
-    `released_by` VARCHAR(50) NULL,
-    INDEX `idx_plate` (`plate`),
-    INDEX `idx_impound_lot` (`impound_lot`),
-    INDEX `idx_impounded_at` (`impounded_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Driver stats for leaderboard/metrics
 CREATE TABLE IF NOT EXISTS `tow_driver_stats` (
@@ -89,17 +73,37 @@ CREATE TABLE IF NOT EXISTS `tow_driver_stats` (
     `total_jobs_completed` INT DEFAULT 0,
     `total_miles_driven` FLOAT DEFAULT 0,
     `total_earned` INT DEFAULT 0,
+    `reliability_rating` INT DEFAULT 100,
+    `damage_free_tows` INT DEFAULT 0,
+    `luxury_unlocked` BOOLEAN DEFAULT FALSE,
     `pve_jobs` INT DEFAULT 0,
     `customer_jobs` INT DEFAULT 0,
     `police_jobs` INT DEFAULT 0,
     `ems_jobs` INT DEFAULT 0,
+    `cancelled_jobs` INT DEFAULT 0,
     `average_completion_time` INT DEFAULT 0 COMMENT 'In seconds',
     `fastest_completion` INT DEFAULT 0 COMMENT 'In seconds',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Dispute logs (predatory towing confrontations)
+-- Impound vehicle tracking
+CREATE TABLE IF NOT EXISTS `tow_impound_vehicles` (
+    `plate` VARCHAR(10) PRIMARY KEY,
+    `impound_lot` VARCHAR(50) NOT NULL,
+    `towed_by` VARCHAR(50) NOT NULL COMMENT 'citizenid of tow driver',
+    `tow_job_id` VARCHAR(20) DEFAULT NULL,
+    `reason` VARCHAR(255) DEFAULT NULL,
+    `fee_base` INT DEFAULT 0,
+    `fee_per_day` INT DEFAULT 0,
+    `impounded_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `released_at` TIMESTAMP NULL,
+    `released_by` VARCHAR(50) NULL,
+    INDEX `impound_lot` (`impound_lot`),
+    INDEX `impounded_at` (`impounded_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Dispute logs (predatory towing confrontations) — used by server/pve.lua
 CREATE TABLE IF NOT EXISTS `tow_dispute_logs` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `job_id` VARCHAR(20) NOT NULL,
@@ -109,7 +113,7 @@ CREATE TABLE IF NOT EXISTS `tow_dispute_logs` (
     `officer_source` INT NULL COMMENT 'Server ID of arresting officer',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `resolved_at` TIMESTAMP NULL,
-    INDEX `idx_job_id` (`job_id`),
-    INDEX `idx_driver_id` (`driver_id`),
-    INDEX `idx_outcome` (`outcome`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    INDEX `job_id` (`job_id`),
+    INDEX `driver_id` (`driver_id`),
+    INDEX `outcome` (`outcome`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

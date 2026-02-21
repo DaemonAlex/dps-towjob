@@ -64,6 +64,7 @@ RegisterNetEvent('dps-towjob:server:toggleDuty', function(shopId)
 
         DutyTracker[source] = {
             shop = shopId,
+            citizenid = Player.PlayerData.citizenid,
             state = TowJob.DriverState.AVAILABLE,
             clockedInAt = os.time(),
             lastTowCompleted = nil

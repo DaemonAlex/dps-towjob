@@ -3,8 +3,6 @@
     Roadside repair services (tire change, jumpstart, etc.)
 ]]
 
-local QBCore = exports['qb-core']:GetCoreObject()
-
 -- Target for roadside services on vehicles
 CreateThread(function()
     exports.ox_target:addGlobalVehicle({
@@ -52,7 +50,7 @@ function OpenRoadsideMenu(vehicle)
 
         -- Check if item required
         if service.item then
-            local hasItem = exports.ox_inventory:Search('count', service.item) > 0
+            local hasItem = Bridge.HasItem(service.item)
             if not hasItem then
                 canPerform = false
                 reason = 'Missing: ' .. service.item

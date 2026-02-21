@@ -213,8 +213,11 @@ AddEventHandler('playerDropped', function()
     -- Clean up cooldowns
     EventCooldowns[source] = nil
 
+    -- Capture duty data before clearing (need citizenid for rating penalty)
+    local dutyData = DutyTracker[source]
+
     -- Clean up duty tracker
-    if DutyTracker[source] then
+    if dutyData then
         TowJob.Debug('Driver disconnected:', source)
         DutyTracker[source] = nil
     end
@@ -222,8 +225,21 @@ AddEventHandler('playerDropped', function()
     -- Handle active job cancellation
     if ActiveJobs[source] then
         local job = ActiveJobs[source]
-        -- Penalize rating for disconnect during job
-        UpdateDriverRating(source, -5, 'Disconnected during job')
+
+        -- Penalize rating using cached citizenid (player object is gone)
+        local citizenid = dutyData and dutyData.citizenid
+        if citizenid then
+            local currentRating = DriverRatings[citizenid] or 100
+            local newRating = math.max(0, math.min(150, currentRating - 5))
+            DriverRatings[citizenid] = newRating
+            MySQL.update([[
+                INSERT INTO tow_driver_stats (citizenid, reliability_rating)
+                VALUES (?, ?)
+                ON DUPLICATE KEY UPDATE reliability_rating = ?
+            ]], { citizenid, newRating, newRating })
+            TowJob.Debug('Disconnect rating penalty applied:', citizenid, '-5 ->', newRating)
+        end
+
         -- Requeue the job
         job.state = TowJob.JobState.QUEUED
         job.assignedTo = nil
