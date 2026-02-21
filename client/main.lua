@@ -284,8 +284,10 @@ exports('GetCurrentAssignment', function()
     return CurrentJob
 end)
 
--- Key binding for tow menu
+-- Key binding for tow menu (chat command only, F7 handled in thread below)
 RegisterCommand('towmenu', function()
+    if not PlayerData.job or PlayerData.job.name ~= Config.JobName then return end
+
     if not IsOnDuty then
         lib.notify({
             title = 'Tow Job',
@@ -298,7 +300,27 @@ RegisterCommand('towmenu', function()
     OpenTowMenu()
 end, false)
 
-RegisterKeyMapping('towmenu', 'Open Tow Menu', 'keyboard', 'F7')
+-- F7 key only active for tow job players (does not reserve the key globally)
+CreateThread(function()
+    while true do
+        local sleep = 500
+        if PlayerData.job and PlayerData.job.name == Config.JobName then
+            sleep = 0
+            if IsControlJustPressed(0, 168) then -- 168 = F7
+                if IsOnDuty then
+                    OpenTowMenu()
+                else
+                    lib.notify({
+                        title = 'Tow Job',
+                        description = 'You must be on duty',
+                        type = 'error'
+                    })
+                end
+            end
+        end
+        Wait(sleep)
+    end
+end)
 
 function OpenTowMenu()
     local options = {}

@@ -118,7 +118,7 @@ function ShowUIToast(message, toastType)
     })
 end
 
--- Command to open dispatch
+-- Command to open dispatch (chat only, F6 handled in thread below)
 RegisterCommand('dispatch', function()
     if not Bridge.HasJob(Config.JobName) then
         Bridge.Notify('Tow Job', 'You are not a tow driver', 'error')
@@ -127,7 +127,19 @@ RegisterCommand('dispatch', function()
     OpenDispatchUI()
 end, false)
 
-RegisterKeyMapping('dispatch', 'Open Tow Dispatch', 'keyboard', 'F6')
+-- F6 key only active for tow job players (does not reserve the key globally)
+CreateThread(function()
+    while true do
+        local sleep = 500
+        if PlayerData.job and PlayerData.job.name == Config.JobName then
+            sleep = 0
+            if IsControlJustPressed(0, 167) then -- 167 = F6
+                OpenDispatchUI()
+            end
+        end
+        Wait(sleep)
+    end
+end)
 
 -- Export
 exports('OpenDispatchUI', OpenDispatchUI)
