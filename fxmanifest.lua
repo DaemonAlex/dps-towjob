@@ -35,6 +35,7 @@ client_scripts {
     -- Bridge (load first)
     'bridge/init.lua',
     'bridge/client.lua',
+    'bridge/qs-billing_client.lua',
 
     -- Core
     'client/main.lua',

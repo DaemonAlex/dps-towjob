@@ -101,11 +101,13 @@ local function GeneratePlate()
     local nums = '0123456789'
     local plate = ''
     for i = 1, 3 do
-        plate = plate .. chars:sub(math.random(#chars), math.random(#chars))
+        local n = math.random(#chars)
+        plate = plate .. chars:sub(n, n)
     end
     plate = plate .. ' '
     for i = 1, 4 do
-        plate = plate .. nums:sub(math.random(#nums), math.random(#nums))
+        local n = math.random(#nums)
+        plate = plate .. nums:sub(n, n)
     end
     return plate
 end
@@ -620,7 +622,7 @@ function AlertPoliceUnits(alertData)
             local isPolice = false
 
             for _, pJob in ipairs(policeJobs) do
-                if job == pJob then
+                if job and job.name == pJob then
                     isPolice = true
                     break
                 end

@@ -65,17 +65,7 @@ CreateThread(function()
                 }
             })
 
-            -- Create blip (visible to everyone)
-            if shop.blip then
-                local blip = AddBlipForCoord(shop.depot.x, shop.depot.y, shop.depot.z)
-                SetBlipSprite(blip, Config.Blips.depot.sprite)
-                SetBlipColour(blip, Config.Blips.depot.color)
-                SetBlipScale(blip, Config.Blips.depot.scale)
-                SetBlipAsShortRange(blip, true)
-                BeginTextCommandSetBlipName('STRING')
-                AddTextComponentSubstringPlayerName(shop.label)
-                EndTextCommandSetBlipName(blip)
-            end
+            -- Blips managed by centralized blip controller (Blip Policy)
         end
     end
 

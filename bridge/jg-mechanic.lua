@@ -3,16 +3,12 @@
     Integration with JG Scripts mechanic system
 ]]
 
-local QBCore = exports['qb-core']:GetCoreObject()
-
 -- Listen for jg-mechanic duty changes
 RegisterNetEvent('jg-mechanic:server:toggle-duty', function()
     local source = source
-    local Player = QBCore.Functions.GetPlayer(source)
+    local job = Bridge.GetPlayerJob(source)
 
-    if not Player then return end
-
-    local job = Player.PlayerData.job
+    if not job then return end
 
     -- Update shop employee status for mechanic jobs
     if IsMechanicJob(job.name) then
@@ -20,7 +16,7 @@ RegisterNetEvent('jg-mechanic:server:toggle-duty', function()
         if shopId then
             UpdateShopEmployeeStatus(shopId, source, job.onduty)
 
-            TowJob.Debug('Mechanic duty update:', Player.PlayerData.citizenid, job.name, job.onduty)
+            TowJob.Debug('Mechanic duty update:', Bridge.GetIdentifier(source), job.name, job.onduty)
         end
     end
 end)
@@ -35,7 +31,7 @@ function UpdateShopEmployeeStatus(shopId, source, onDuty)
 
     if onDuty then
         ShopEmployees[shopId][source] = {
-            citizenid = QBCore.Functions.GetPlayer(source).PlayerData.citizenid,
+            citizenid = Bridge.GetIdentifier(source),
             clockedIn = os.time()
         }
     else
@@ -49,15 +45,12 @@ function GetMechanicOnDutyCount(shopId)
     if not shop or not shop.mechanicJob then return 0 end
 
     local count = 0
-    local players = QBCore.Functions.GetPlayers()
+    local players = Bridge.GetPlayers()
 
     for _, src in ipairs(players) do
-        local Player = QBCore.Functions.GetPlayer(src)
-        if Player then
-            local job = Player.PlayerData.job
-            if job.name == shop.mechanicJob and job.onduty then
-                count = count + 1
-            end
+        local job = Bridge.GetPlayerJob(src)
+        if job and job.name == shop.mechanicJob and job.onduty then
+            count = count + 1
         end
     end
 
@@ -78,20 +71,17 @@ function NotifyShopMechanics(shopId, title, description, notifyType)
     local shop = Config.ShopJobMapping[shopId]
     if not shop or not shop.mechanicJob then return end
 
-    local players = QBCore.Functions.GetPlayers()
+    local players = Bridge.GetPlayers()
 
     for _, src in ipairs(players) do
-        local Player = QBCore.Functions.GetPlayer(src)
-        if Player then
-            local job = Player.PlayerData.job
-            if job.name == shop.mechanicJob and job.onduty then
-                lib.notify(src, {
-                    title = title,
-                    description = description,
-                    type = notifyType or 'inform',
-                    duration = 8000
-                })
-            end
+        local job = Bridge.GetPlayerJob(src)
+        if job and job.name == shop.mechanicJob and job.onduty then
+            lib.notify(src, {
+                title = title,
+                description = description,
+                type = notifyType or 'inform',
+                duration = 8000
+            })
         end
     end
 end
@@ -144,15 +134,15 @@ end)
 
 RegisterNetEvent('jg-mechanic:server:repairCompleted', function(vehiclePlate, repairCost)
     local source = source
-    local Player = QBCore.Functions.GetPlayer(source)
+    local citizenid = Bridge.GetIdentifier(source)
 
-    if Player then
+    if citizenid then
         -- Update service ticket
         MySQL.update.await([[
             UPDATE tow_service_tickets
             SET status = 'completed', completed_at = NOW(), repaired_by = ?, repair_cost = ?
             WHERE vehicle_data LIKE ? AND status = 'in_progress'
-        ]], { Player.PlayerData.citizenid, repairCost or 0, '%' .. vehiclePlate .. '%' })
+        ]], { citizenid, repairCost or 0, '%' .. vehiclePlate .. '%' })
     end
 
     TowJob.Debug('Repair completed for:', vehiclePlate)

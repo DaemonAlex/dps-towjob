@@ -468,14 +468,26 @@ CreateThread(function()
     end
 end)
 
--- Manual detach keybind
+-- Manual detach keybind (chat only, G key handled in thread below)
 RegisterCommand('towdetach', function()
     if AttachedVehicle then
         DetachVehicle()
     end
 end, false)
 
-RegisterKeyMapping('towdetach', 'Detach Towed Vehicle', 'keyboard', 'G')
+-- G key only active for tow job players while towing (does not reserve the key globally)
+CreateThread(function()
+    while true do
+        local sleep = 500
+        if PlayerData.job and PlayerData.job.name == Config.JobName and AttachedVehicle then
+            sleep = 0
+            if IsControlJustPressed(0, 47) then -- 47 = G
+                DetachVehicle()
+            end
+        end
+        Wait(sleep)
+    end
+end)
 
 -- Exports
 exports('HasAttachedVehicle', function()

@@ -3,8 +3,6 @@
     Queue display and status updates
 ]]
 
-local QBCore = exports['qb-core']:GetCoreObject()
-
 -- Queue update from server
 RegisterNetEvent('dps-towjob:client:queueUpdate', function(queueInfo)
     -- Could display queue status in UI

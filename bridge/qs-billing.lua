@@ -3,8 +3,6 @@
     Integration with Quasar Store billing system
 ]]
 
-local QBCore = exports['qb-core']:GetCoreObject()
-
 -- Check if qs-billing is available
 local function HasQSBilling()
     return GetResourceState('qs-billing') == 'started'
@@ -17,10 +15,10 @@ function CreateTowBill(driverSource, customerSource, amount, description)
         return false
     end
 
-    local Driver = QBCore.Functions.GetPlayer(driverSource)
-    local Customer = QBCore.Functions.GetPlayer(customerSource)
+    local driverCid = Bridge.GetIdentifier(driverSource)
+    local customerCid = Bridge.GetIdentifier(customerSource)
 
-    if not Driver or not Customer then
+    if not driverCid or not customerCid then
         return false
     end
 
@@ -30,8 +28,8 @@ function CreateTowBill(driverSource, customerSource, amount, description)
 
     -- Create bill using qs-billing export
     exports['qs-billing']:CreateBill({
-        sender = Driver.PlayerData.citizenid,
-        target = Customer.PlayerData.citizenid,
+        sender = driverCid,
+        target = customerCid,
         amount = amount,
         description = description or 'Tow Service',
         society = societyName
@@ -88,26 +86,26 @@ end)
 function CreateImpoundInvoice(source, amount, vehiclePlate)
     if not HasQSBilling() then
         -- Direct payment if no billing system
-        local Player = QBCore.Functions.GetPlayer(source)
-        if Player then
-            if Player.PlayerData.money.cash >= amount then
-                Player.Functions.RemoveMoney('cash', amount, 'impound-fee')
-                return true
-            elseif Player.PlayerData.money.bank >= amount then
-                Player.Functions.RemoveMoney('bank', amount, 'impound-fee')
-                return true
-            end
+        local cash = Bridge.GetMoney(source, 'cash')
+        if cash >= amount then
+            Bridge.RemoveMoney(source, 'cash', amount)
+            return true
+        end
+        local bank = Bridge.GetMoney(source, 'bank')
+        if bank >= amount then
+            Bridge.RemoveMoney(source, 'bank', amount)
+            return true
         end
         return false
     end
 
-    local Player = QBCore.Functions.GetPlayer(source)
-    if not Player then return false end
+    local citizenid = Bridge.GetIdentifier(source)
+    if not citizenid then return false end
 
     -- For impound, bill directly (no society, goes to city)
     exports['qs-billing']:CreateBill({
         sender = 'government',
-        target = Player.PlayerData.citizenid,
+        target = citizenid,
         amount = amount,
         description = 'Impound Fee - ' .. vehiclePlate,
         society = nil -- No society, goes to void/city
@@ -134,17 +132,7 @@ RegisterNetEvent('dps-towjob:server:openInvoiceMenu', function(targetSource)
     TriggerClientEvent('dps-towjob:client:openInvoiceMenu', source, targetSource)
 end)
 
--- Client-side invoice creation
-RegisterNetEvent('dps-towjob:client:openInvoiceMenu', function(targetSource)
-    local input = lib.inputDialog('Create Invoice', {
-        { type = 'number', label = 'Amount ($)', required = true, min = 1 },
-        { type = 'input', label = 'Description', placeholder = 'Tow service, roadside repair, etc.' }
-    })
-
-    if input then
-        TriggerServerEvent('dps-towjob:server:billCustomer', targetSource, input[1], input[2] or 'Tow Service')
-    end
-end)
+-- Client-side invoice UI is in bridge/qs-billing_client.lua
 
 -- Integration with roadside billing
 RegisterNetEvent('dps-towjob:server:roadsideBill', function(customerSource, serviceId, amount)
@@ -161,8 +149,8 @@ end)
 lib.callback.register('dps-towjob:server:hasPendingBills', function(source)
     if not HasQSBilling() then return false end
 
-    local Player = QBCore.Functions.GetPlayer(source)
-    if not Player then return false end
+    local citizenid = Bridge.GetIdentifier(source)
+    if not citizenid then return false end
 
     -- This would need to check qs-billing's database
     -- Implementation depends on qs-billing's available exports
