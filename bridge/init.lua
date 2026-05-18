@@ -31,7 +31,7 @@ function Bridge.GetFramework()
     if Bridge._fw then return Bridge._fw end
 
     if Bridge.Framework == 'qbx' then
-        Bridge._fw = exports['qbx_core']:GetCoreObject()
+        Bridge._fw = exports['qb-core']:GetCoreObject()
     elseif Bridge.Framework == 'qb' then
         Bridge._fw = exports['qb-core']:GetCoreObject()
     elseif Bridge.Framework == 'esx' then

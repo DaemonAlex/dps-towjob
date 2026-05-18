@@ -19,7 +19,6 @@ local vector3 = vector3
 local lib = lib
 
 -- Local state
-local QBCore = exports['qb-core']:GetCoreObject()
 local AttachedVehicle = nil
 local IsAttaching = false
 local TowRope = nil
