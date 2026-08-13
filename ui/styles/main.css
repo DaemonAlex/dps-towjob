@@ -1,33 +1,43 @@
 /* DPS Tow Dispatch - Dashboard UI */
-/* Industrial/Professional Theme */
+/* Coastal-Dusk Theme */
+
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap');
+
+:root {
+  --cd-night:#0a0d18; --cd-deep:#0f1424; --cd-panel:#151b30; --cd-raised:#1b2340; --cd-border:#26304d;
+  --cd-ink:#f4f1ea; --cd-dim:#aeb6d2;
+  --cd-sun:#ff7a45; --cd-sun2:#ffab6b; --cd-sun-dim:#2a1206;
+  --cd-sea:#4ec9b0; --cd-cool:#5bc8e8;
+  --cd-ok:#4ec98a; --cd-warn:#ffb347; --cd-bad:#ff6b6b;
+}
 
 :root {
     /* Colors */
-    --bg-primary: rgba(18, 18, 24, 0.95);
-    --bg-secondary: rgba(28, 28, 36, 0.95);
-    --bg-card: rgba(38, 38, 48, 0.9);
-    --bg-hover: rgba(50, 50, 65, 0.9);
-    --bg-glass: rgba(255, 255, 255, 0.05);
+    --bg-primary: color-mix(in srgb, var(--cd-deep) 95%, transparent);
+    --bg-secondary: color-mix(in srgb, var(--cd-panel) 95%, transparent);
+    --bg-card: color-mix(in srgb, var(--cd-raised) 90%, transparent);
+    --bg-hover: color-mix(in srgb, var(--cd-raised) 80%, var(--cd-ink));
+    --bg-glass: color-mix(in srgb, var(--cd-ink) 5%, transparent);
 
-    --text-primary: #ffffff;
-    --text-secondary: rgba(255, 255, 255, 0.7);
-    --text-muted: rgba(255, 255, 255, 0.5);
+    --text-primary: var(--cd-ink);
+    --text-secondary: var(--cd-dim);
+    --text-muted: color-mix(in srgb, var(--cd-dim) 65%, transparent);
 
-    --accent-primary: #f59e0b;
-    --accent-secondary: #fbbf24;
-    --accent-gradient: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    --accent-primary: var(--cd-sun);
+    --accent-secondary: var(--cd-sun2);
+    --accent-gradient: linear-gradient(135deg, var(--cd-sun) 0%, color-mix(in srgb, var(--cd-sun) 70%, var(--cd-night)) 100%);
 
-    --success: #22c55e;
-    --warning: #f59e0b;
-    --danger: #ef4444;
-    --info: #3b82f6;
+    --success: var(--cd-ok);
+    --warning: var(--cd-warn);
+    --danger: var(--cd-bad);
+    --info: var(--cd-sea);
 
-    --priority-high: #ef4444;
-    --priority-normal: #3b82f6;
-    --priority-low: #6b7280;
+    --priority-high: var(--cd-bad);
+    --priority-normal: var(--cd-sea);
+    --priority-low: var(--cd-dim);
 
-    --border-color: rgba(255, 255, 255, 0.1);
-    --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --border-color: var(--cd-border);
+    --shadow: 0 8px 32px color-mix(in srgb, var(--cd-night) 40%, transparent);
 
     /* Sizing */
     --radius-sm: 6px;
@@ -48,7 +58,7 @@
 }
 
 body {
-    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-family: 'Roboto', sans-serif;
     background: transparent;
     color: var(--text-primary);
     overflow: hidden;
@@ -68,7 +78,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.6);
+    background: color-mix(in srgb, var(--cd-night) 60%, transparent);
     backdrop-filter: blur(4px);
 }
 
@@ -124,6 +134,7 @@ body {
     gap: 10px;
     font-size: 18px;
     font-weight: 700;
+    font-family: 'Orbitron', sans-serif;
 }
 
 .logo i {
@@ -136,8 +147,8 @@ body {
     align-items: center;
     gap: 8px;
     padding: 6px 12px;
-    background: rgba(34, 197, 94, 0.15);
-    border: 1px solid rgba(34, 197, 94, 0.3);
+    background: color-mix(in srgb, var(--cd-ok) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cd-ok) 30%, transparent);
     border-radius: var(--radius-md);
     font-size: 13px;
     font-weight: 500;
@@ -153,8 +164,8 @@ body {
 }
 
 .duty-badge.off-duty {
-    background: rgba(239, 68, 68, 0.15);
-    border-color: rgba(239, 68, 68, 0.3);
+    background: color-mix(in srgb, var(--cd-bad) 15%, transparent);
+    border-color: color-mix(in srgb, var(--cd-bad) 30%, transparent);
     color: var(--danger);
 }
 
@@ -204,7 +215,7 @@ body {
 
 .close-btn:hover {
     background: var(--danger);
-    color: white;
+    color: var(--cd-ink);
 }
 
 /* Dashboard Body */
@@ -241,6 +252,7 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+    font-family: 'Orbitron', sans-serif;
 }
 
 .panel-header h3 i {
@@ -268,7 +280,7 @@ body {
 
 .btn-icon:hover {
     background: var(--accent-primary);
-    color: white;
+    color: var(--cd-ink);
 }
 
 .panel-content {
@@ -324,9 +336,9 @@ body {
     font-size: 12px;
 }
 
-.job-type.police i { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
-.job-type.customer i { background: rgba(59, 130, 246, 0.2); color: var(--info); }
-.job-type.pve i { background: rgba(107, 114, 128, 0.2); color: var(--text-secondary); }
+.job-type.police i { background: color-mix(in srgb, var(--cd-bad) 20%, transparent); color: var(--danger); }
+.job-type.customer i { background: color-mix(in srgb, var(--cd-sea) 20%, transparent); color: var(--info); }
+.job-type.pve i { background: color-mix(in srgb, var(--cd-dim) 20%, transparent); color: var(--text-secondary); }
 
 .priority-badge {
     padding: 4px 8px;
@@ -337,9 +349,9 @@ body {
     letter-spacing: 0.5px;
 }
 
-.priority-high { background: rgba(239, 68, 68, 0.2); color: var(--priority-high); }
-.priority-normal { background: rgba(59, 130, 246, 0.2); color: var(--priority-normal); }
-.priority-low { background: rgba(107, 114, 128, 0.2); color: var(--priority-low); }
+.priority-high { background: color-mix(in srgb, var(--cd-bad) 20%, transparent); color: var(--priority-high); }
+.priority-normal { background: color-mix(in srgb, var(--cd-sea) 20%, transparent); color: var(--priority-normal); }
+.priority-low { background: color-mix(in srgb, var(--cd-dim) 20%, transparent); color: var(--priority-low); }
 
 .queue-item-body {
     display: flex;
@@ -388,9 +400,9 @@ body {
     text-transform: uppercase;
 }
 
-.job-state.en-route { background: rgba(59, 130, 246, 0.2); color: var(--info); }
-.job-state.on-scene { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
-.job-state.towing { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+.job-state.en-route { background: color-mix(in srgb, var(--cd-sea) 20%, transparent); color: var(--info); }
+.job-state.on-scene { background: color-mix(in srgb, var(--cd-warn) 20%, transparent); color: var(--warning); }
+.job-state.towing { background: color-mix(in srgb, var(--cd-ok) 20%, transparent); color: var(--success); }
 
 .active-item-body {
     display: flex;
@@ -436,7 +448,7 @@ body {
     background: var(--accent-gradient);
     border-radius: var(--radius-md);
     font-size: 16px;
-    color: white;
+    color: var(--cd-ink);
 }
 
 .driver-info {
@@ -461,8 +473,8 @@ body {
     text-transform: uppercase;
 }
 
-.driver-status.available { background: rgba(34, 197, 94, 0.2); color: var(--success); }
-.driver-status.busy { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+.driver-status.available { background: color-mix(in srgb, var(--cd-ok) 20%, transparent); color: var(--success); }
+.driver-status.busy { background: color-mix(in srgb, var(--cd-warn) 20%, transparent); color: var(--warning); }
 
 /* Empty State */
 .empty-state {
@@ -517,10 +529,10 @@ body {
     font-size: 16px;
 }
 
-.stat-icon.success { background: rgba(34, 197, 94, 0.2); color: var(--success); }
-.stat-icon.warning { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
-.stat-icon.info { background: rgba(59, 130, 246, 0.2); color: var(--info); }
-.stat-icon.danger { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+.stat-icon.success { background: color-mix(in srgb, var(--cd-ok) 20%, transparent); color: var(--success); }
+.stat-icon.warning { background: color-mix(in srgb, var(--cd-warn) 20%, transparent); color: var(--warning); }
+.stat-icon.info { background: color-mix(in srgb, var(--cd-sea) 20%, transparent); color: var(--info); }
+.stat-icon.danger { background: color-mix(in srgb, var(--cd-bad) 20%, transparent); color: var(--danger); }
 
 .stat-info {
     display: flex;
@@ -530,6 +542,7 @@ body {
 .stat-info .stat-value {
     font-size: 18px;
     font-weight: 700;
+    font-family: 'Roboto Mono', monospace;
 }
 
 .stat-info .stat-label {
@@ -556,7 +569,7 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.6);
+    background: color-mix(in srgb, var(--cd-night) 60%, transparent);
     backdrop-filter: blur(4px);
 }
 
@@ -582,6 +595,7 @@ body {
 .modal-header h2 {
     font-size: 16px;
     font-weight: 600;
+    font-family: 'Orbitron', sans-serif;
 }
 
 .modal-body {
@@ -639,13 +653,13 @@ body {
 
 .btn-primary {
     background: var(--accent-gradient);
-    color: white;
+    color: var(--cd-ink);
     flex: 1;
 }
 
 .btn-primary:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--cd-sun) 30%, transparent);
 }
 
 .btn-secondary {
@@ -722,7 +736,7 @@ body {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: color-mix(in srgb, var(--cd-ink) 20%, transparent);
 }
 
 /* Responsive */
