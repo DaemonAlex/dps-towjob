@@ -3,7 +3,7 @@
     Queue management and job distribution
 ]]
 
-local QBCore = exports['qb-core']:GetCoreObject()
+-- Framework access goes through Bridge (qbx has no GetCoreObject on this box)
 
 -- Add job to queue
 function AddToQueue(request)
@@ -25,7 +25,13 @@ function AddToQueue(request)
         state = TowJob.JobState.QUEUED,
         assignedTo = nil,
         createdAt = os.time(),
-        zone = TowJob.GetZoneName(request.coords)
+        zone = TowJob.GetZoneName(request.coords),
+        -- Preserve PVE / predatory metadata so the server stays authoritative
+        -- over commission (settlement math), dispatch display, and cleanup.
+        pveId = request.pveId,
+        violation = request.violation,
+        violationText = request.violationText,
+        commission = request.commission,
     }
 
     -- Insert based on priority
@@ -70,7 +76,7 @@ exports('AddToQueue', AddToQueue)
 
 -- Request tow (main entry point)
 exports('RequestTow', function(source, coords, towType, priority)
-    local Player = source and QBCore.Functions.GetPlayer(source)
+    local Player = source and Bridge.GetPlayer(source)
 
     return AddToQueue({
         type = towType or TowJob.JobTypes.CUSTOMER,
@@ -122,11 +128,12 @@ function AssignJobToDriver(source, job)
     DutyTracker[source].state = TowJob.DriverState.BUSY
 
     -- Update database
+    local assignPlayer = Bridge.GetPlayer(source)
     MySQL.update.await([[
         UPDATE tow_jobs SET state = ?, driver_id = ? WHERE id = ?
     ]], {
         job.state,
-        QBCore.Functions.GetPlayer(source).PlayerData.citizenid,
+        assignPlayer and assignPlayer.PlayerData.citizenid or nil,
         job.id
     })
 
@@ -135,8 +142,8 @@ function AssignJobToDriver(source, job)
 
     -- Notify requester if applicable
     if job.requesterSource then
-        local Player = QBCore.Functions.GetPlayer(source)
-        local driverName = Player.PlayerData.charinfo.firstname .. ' ' .. Player.PlayerData.charinfo.lastname
+        local Player = assignPlayer
+        local driverName = Player and (Player.PlayerData.charinfo.firstname .. ' ' .. Player.PlayerData.charinfo.lastname) or 'A driver'
 
         TriggerClientEvent('ox_lib:notify', job.requesterSource, {
             title = 'Tow Service',
@@ -190,11 +197,34 @@ RegisterNetEvent('dps-towjob:server:arrivedOnScene', function(jobId)
 end)
 
 -- Vehicle attached
+-- H2: this is the ONLY transition into TOWING, and completeJob requires TOWING.
+-- So this handler is server-authoritative about "the vehicle is really hooked":
+-- the driver must be on duty, near the pickup, and coming from a pre-tow state.
 RegisterNetEvent('dps-towjob:server:vehicleAttached', function(jobId, vehicleData)
     local source = source
-    local job = ActiveJobs[source]
 
+    -- Anti-spam
+    if CheckCooldown(source, 'vehicleAttached') then return end
+
+    local job = ActiveJobs[source]
     if not job or job.id ~= jobId then return end
+    if type(vehicleData) ~= 'table' then return end
+
+    -- Must be an on-duty tow driver
+    if not DutyTracker[source] then return end
+
+    -- Enforce ordering: can only attach from a pre-tow state, never re-attach
+    local s = job.state
+    if s ~= TowJob.JobState.ASSIGNED and s ~= TowJob.JobState.EN_ROUTE and s ~= TowJob.JobState.ON_SCENE then
+        TowJob.Debug('Rejected vehicleAttached from state:', s, 'job:', jobId)
+        return
+    end
+
+    -- Must actually be at the pickup to hook the vehicle
+    if not ValidateDistance(source, job.pickupCoords, 15.0) then
+        TowJob.Debug('Rejected vehicleAttached: too far from pickup', source, jobId)
+        return
+    end
 
     job.state = TowJob.JobState.TOWING
     job.vehiclePlate = vehicleData.plate
@@ -256,10 +286,30 @@ RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
     local job = ActiveJobs[source]
     if not job or job.id ~= jobId then return end
 
+    -- H2 state machine: only a job that was actually hooked (TOWING) and has a
+    -- server-assigned destination can be completed, and the driver must have
+    -- driven it to that destination. This blocks "skip the tow, get full pay".
+    if job.state ~= TowJob.JobState.TOWING then
+        TowJob.Debug('Rejected completeJob from state:', job.state, 'job:', jobId)
+        return
+    end
+    if not job.destination or not job.destination.coords then
+        TowJob.Debug('Rejected completeJob: no destination', jobId)
+        return
+    end
+    if not ValidateDistance(source, job.destination.coords, 15.0) then
+        lib.notify(source, {
+            title = 'Tow Job',
+            description = 'You must deliver the vehicle to the destination',
+            type = 'error'
+        })
+        return
+    end
+
     job.state = TowJob.JobState.COMPLETED
     job.completedAt = os.time()
 
-    -- Calculate payment
+    -- Calculate payment SERVER-SIDE from server-tracked pickup/destination.
     local distance = TowJob.CalculateDistance(job.pickupCoords, job.destination.coords)
     local isPve = job.type == TowJob.JobTypes.PVE
     local totalPayment = TowJob.CalculatePayment(distance, isPve)
@@ -279,8 +329,8 @@ RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
         distance = distance
     }
 
-    -- Process payment
-    TriggerEvent('dps-towjob:server:processPayment', source, job)
+    -- Process payment (C2: internal call, NOT a spoofable net event).
+    ProcessPayment(source, job)
 
     -- Update database with impound tracking
     MySQL.update.await([[
@@ -293,7 +343,7 @@ RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
     })
 
     -- Update driver stats
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
     if Player then
         local citizenid = Player.PlayerData.citizenid
         local jobTypeColumn = job.type .. '_jobs'
@@ -350,7 +400,7 @@ RegisterNetEvent('dps-towjob:server:cancelJob', function(jobId, reason)
     UpdateDriverRating(source, -5, 'Cancelled job')
 
     -- Update cancelled jobs count
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
     if Player then
         MySQL.update.await([[
             INSERT INTO tow_driver_stats (citizenid, cancelled_jobs)
@@ -437,10 +487,10 @@ function ShopHasEmployees(shopId)
     local shop = Config.ShopJobMapping[shopId]
     if not shop or not shop.mechanicJob then return false end
 
-    local players = QBCore.Functions.GetPlayers()
+    local players = Bridge.GetPlayers()
 
     for _, src in ipairs(players) do
-        local Player = QBCore.Functions.GetPlayer(src)
+        local Player = Bridge.GetPlayer(src)
         if Player then
             local job = Player.PlayerData.job
             if job.name == shop.mechanicJob and job.onduty then

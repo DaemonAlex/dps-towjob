@@ -3,75 +3,57 @@
     Payment processing and society fund management
 ]]
 
-local QBCore = exports['qb-core']:GetCoreObject()
+-- Framework access goes through Bridge (qbx has no GetCoreObject on this box)
+--
+-- MONEY MODEL (H1): qb-management is NOT installed on this box, so we do NOT
+-- mint society money. Instead the "shop fund" is a server-side DB ledger in
+-- tow_shop_transactions (credits = 'tow_payment', debits = 'withdrawal'), and
+-- driver earnings are tracked authoritatively in tow_driver_earnings. Drivers
+-- are paid to their bank directly on collection. All amounts are computed
+-- server-side (see server/queue.lua completeJob) and never read from a client.
 
--- Get management export
-local function GetManagement()
-    return exports['qb-management']
-end
-
--- Add to shop fund
+-- Record the shop's cut in the server ledger (no external management resource).
 function AddToShopFund(shopId, amount, reason)
     local shop = Config.ShopJobMapping[shopId]
-    if not shop or not shop.societyName then
-        TowJob.Debug('Warning: No society for shop', shopId)
+    if not shop then
+        TowJob.Debug('Warning: unknown shop for fund credit', shopId)
         return false
     end
 
-    local Management = GetManagement()
-    Management:AddMoney(shop.societyName, amount)
-
-    -- Log transaction
     MySQL.insert.await([[
         INSERT INTO tow_shop_transactions (shop, amount, type, description)
         VALUES (?, ?, 'tow_payment', ?)
     ]], { shopId, amount, reason })
 
-    TowJob.Debug('Added to shop fund:', shopId, amount)
+    TowJob.Debug('Shop fund ledger credit:', shopId, amount)
     return true
 end
 
--- Withdraw from shop fund
+-- Record a driver withdrawal in the ledger. The uncollected balance is the
+-- authority (checked in collectEarnings), so this just logs the debit.
 function WithdrawFromShopFund(shopId, citizenid, amount)
-    local shop = Config.ShopJobMapping[shopId]
-    if not shop or not shop.societyName then
-        return false, 'No society fund'
-    end
-
-    local Management = GetManagement()
-    local balance = Management:GetAccount(shop.societyName)
-
-    if balance < amount then
-        return false, 'Insufficient funds'
-    end
-
-    Management:RemoveMoney(shop.societyName, amount)
-
-    -- Log withdrawal
     MySQL.insert.await([[
         INSERT INTO tow_shop_transactions (shop, amount, type, description, citizenid)
         VALUES (?, ?, 'withdrawal', 'Driver earnings withdrawal', ?)
-    ]], { shopId, amount, citizenid })
+    ]], { shopId or 'unknown', amount, citizenid })
 
     return true
 end
 
--- Get shop balance
+-- Shop balance is derived from the ledger (credits minus withdrawals).
 function GetShopBalance(shopId)
-    local shop = Config.ShopJobMapping[shopId]
-    if not shop or not shop.societyName then
-        return 0
-    end
-
-    local Management = GetManagement()
-    return Management:GetAccount(shop.societyName) or 0
+    local result = MySQL.scalar.await([[
+        SELECT COALESCE(SUM(CASE WHEN type = 'withdrawal' THEN -amount ELSE amount END), 0)
+        FROM tow_shop_transactions WHERE shop = ?
+    ]], { shopId })
+    return result or 0
 end
 
 exports('GetShopBalance', GetShopBalance)
 
 -- Add driver earning
 function AddDriverEarning(source, shopId, amount)
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
     if not Player then return end
 
     local citizenid = Player.PlayerData.citizenid
@@ -127,9 +109,12 @@ function AddDriverEarning(source, shopId, amount)
     TowJob.Debug('Driver earning added:', citizenid, amount)
 end
 
--- Process payment for completed job
-RegisterNetEvent('dps-towjob:server:processPayment', function(source, job)
-    local Player = QBCore.Functions.GetPlayer(source)
+-- Process payment for a completed job.
+-- C2: this is an INTERNAL function called only from completeJob (server/queue.lua).
+-- It is intentionally NOT a RegisterNetEvent — a client cannot invoke it, and
+-- job.payment was computed server-side in completeJob from server-tracked state.
+function ProcessPayment(source, job)
+    local Player = Bridge.GetPlayer(source)
     if not Player then return end
 
     local shopId = GetDriverShop(source)
@@ -139,8 +124,12 @@ RegisterNetEvent('dps-towjob:server:processPayment', function(source, job)
     end
 
     local payment = job.payment
+    if not payment or type(payment.driver) ~= 'number' then
+        TowJob.Debug('ProcessPayment: missing server-computed payment', source)
+        return
+    end
 
-    -- Add driver's cut to their earnings (stored in shop fund)
+    -- Add driver's cut to their earnings (tracked in the DB ledger)
     AddDriverEarning(source, shopId, payment.driver)
 
     -- Notify driver
@@ -155,12 +144,16 @@ RegisterNetEvent('dps-towjob:server:processPayment', function(source, job)
         type = 'success',
         duration = 8000
     })
-end)
+end
 
 -- Driver collects earnings
 RegisterNetEvent('dps-towjob:server:collectEarnings', function()
     local source = source
-    local Player = QBCore.Functions.GetPlayer(source)
+
+    -- Anti-spam (also protects the read-modify-write below)
+    if CheckCooldown(source, 'collectEarnings') then return end
+
+    local Player = Bridge.GetPlayer(source)
     if not Player then return end
 
     local citizenid = Player.PlayerData.citizenid
@@ -178,11 +171,11 @@ RegisterNetEvent('dps-towjob:server:collectEarnings', function()
     local amount = earnings.uncollected
     local shopId = earnings.shop
 
-    -- Withdraw from shop fund
+    -- Record the withdrawal in the ledger and pay the driver directly.
     local success, error = WithdrawFromShopFund(shopId, citizenid, amount)
 
     if success then
-        Player.Functions.AddMoney('bank', amount, 'tow-earnings')
+        Bridge.AddMoney(source, 'bank', amount)
         DriverEarnings[citizenid].uncollected = 0
 
         -- Update database
@@ -208,7 +201,7 @@ end)
 
 -- Get driver earnings
 lib.callback.register('dps-towjob:server:getEarnings', function(source)
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
     if not Player then return nil end
 
     local citizenid = Player.PlayerData.citizenid
@@ -242,8 +235,10 @@ end)
 -- Impound fee handling
 RegisterNetEvent('dps-towjob:server:payImpoundFee', function(impoundId, vehiclePlate)
     local source = source
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
     if not Player then return end
+
+    local citizenid = Player.PlayerData.citizenid
 
     local impound = Config.ImpoundLots[impoundId]
     if not impound then
@@ -255,7 +250,8 @@ RegisterNetEvent('dps-towjob:server:payImpoundFee', function(impoundId, vehicleP
         return
     end
 
-    -- Get vehicle from impound database
+    -- H3: ownership check. The payer must own this plate. This prevents
+    -- releasing (and then spawning to themselves) any vehicle sitting in impound.
     local vehicle = MySQL.single.await([[
         SELECT * FROM player_vehicles WHERE plate = ? AND state = 2
     ]], { vehiclePlate })
@@ -269,13 +265,32 @@ RegisterNetEvent('dps-towjob:server:payImpoundFee', function(impoundId, vehicleP
         return
     end
 
-    -- Calculate fee based on days stored
-    local storedAt = vehicle.impound_date or os.time()
-    local daysStored = math.floor((os.time() - storedAt) / 86400)
+    if vehicle.citizenid ~= citizenid then
+        TowJob.Debug('Impound release denied (not owner):', citizenid, 'plate', vehiclePlate)
+        lib.notify(source, {
+            title = 'Impound',
+            description = 'This is not your vehicle',
+            type = 'error'
+        })
+        return
+    end
+
+    -- M4: compute days stored from the impound record's TIMESTAMP using SQL
+    -- date math (player_vehicles has no impound_date column, which previously
+    -- made daysStored always 0). Falls back to 0 days if no tracking row.
+    local impoundRecord = MySQL.single.await([[
+        SELECT impound_lot, TIMESTAMPDIFF(DAY, impounded_at, NOW()) AS days_stored
+        FROM tow_impound_vehicles
+        WHERE plate = ? AND released_at IS NULL
+    ]], { vehiclePlate })
+
+    local daysStored = math.max(0, (impoundRecord and impoundRecord.days_stored) or 0)
     local fee = CalculateImpoundFee(impoundId, daysStored)
 
-    -- Check if player has enough money
-    if Player.PlayerData.money.cash < fee and Player.PlayerData.money.bank < fee then
+    -- Check funds via Bridge (works on qbx)
+    local cash = Bridge.GetMoney(source, 'cash')
+    local bank = Bridge.GetMoney(source, 'bank')
+    if cash < fee and bank < fee then
         lib.notify(source, {
             title = 'Impound',
             description = 'Not enough money. Fee: ' .. TowJob.FormatMoney(fee),
@@ -285,19 +300,24 @@ RegisterNetEvent('dps-towjob:server:payImpoundFee', function(impoundId, vehicleP
     end
 
     -- Remove money
-    local moneyType = Player.PlayerData.money.cash >= fee and 'cash' or 'bank'
-    Player.Functions.RemoveMoney(moneyType, fee, 'impound-fee')
+    local moneyType = cash >= fee and 'cash' or 'bank'
+    Bridge.RemoveMoney(source, moneyType, fee)
 
     -- Log transaction
     MySQL.insert.await([[
         INSERT INTO tow_shop_transactions (shop, amount, type, description, citizenid)
         VALUES ('impound', ?, 'impound_fee', ?, ?)
-    ]], { fee, 'Impound fee for ' .. vehiclePlate, Player.PlayerData.citizenid })
+    ]], { fee, 'Impound fee for ' .. vehiclePlate, citizenid })
 
-    -- Release vehicle
+    -- Release vehicle in player_vehicles and mark the tracking row released
     MySQL.update.await([[
         UPDATE player_vehicles SET state = 0 WHERE plate = ?
     ]], { vehiclePlate })
+
+    MySQL.update.await([[
+        UPDATE tow_impound_vehicles SET released_at = NOW(), released_by = ?
+        WHERE plate = ? AND released_at IS NULL
+    ]], { citizenid, vehiclePlate })
 
     lib.notify(source, {
         title = 'Impound',

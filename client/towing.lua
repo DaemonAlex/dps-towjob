@@ -496,3 +496,21 @@ end)
 exports('GetAttachedVehicle', function()
     return AttachedVehicle
 end)
+
+-- L3: on resource stop/restart, detach any vehicle still on the truck and
+-- clean up the rope so we don't leave an orphaned attached/roped vehicle.
+AddEventHandler('onResourceStop', function(resourceName)
+    if resourceName ~= GetCurrentResourceName() then return end
+
+    if AttachedVehicle and DoesEntityExist(AttachedVehicle) then
+        DetachEntity(AttachedVehicle, true, true)
+        SetVehicleOnGroundProperly(AttachedVehicle)
+        AttachedVehicle = nil
+    end
+
+    if TowRope then
+        DeleteRope(TowRope)
+        TowRope = nil
+        RopeUnloadTextures()
+    end
+end)

@@ -6,37 +6,46 @@
 if not Bridge then Bridge = {} end
 
 -- Get player object
+-- NOTE: For qbx the returned object still carries the QB-compatible API
+-- (.PlayerData.citizenid/.job/.money/.charinfo and .Functions.AddMoney/
+-- RemoveMoney/SetJobDuty), so all downstream IsQB() logic works unchanged.
 function Bridge.GetPlayer(source)
-    if Bridge.IsQB() then
-        local fw = Bridge.GetFramework()
-        return fw.Functions.GetPlayer(source)
+    if Bridge.IsQBX() then
+        return exports.qbx_core:GetPlayer(source)
+    elseif Bridge.Framework == 'qb' then
+        return Bridge.GetFramework().Functions.GetPlayer(source)
     elseif Bridge.IsESX() then
-        local fw = Bridge.GetFramework()
-        return fw.GetPlayerFromId(source)
+        return Bridge.GetFramework().GetPlayerFromId(source)
     end
     return nil
 end
 
 -- Get player by identifier
 function Bridge.GetPlayerByIdentifier(identifier)
-    if Bridge.IsQB() then
-        local fw = Bridge.GetFramework()
-        return fw.Functions.GetPlayerByCitizenId(identifier)
+    if Bridge.IsQBX() then
+        return exports.qbx_core:GetPlayerByCitizenId(identifier)
+    elseif Bridge.Framework == 'qb' then
+        return Bridge.GetFramework().Functions.GetPlayerByCitizenId(identifier)
     elseif Bridge.IsESX() then
-        local fw = Bridge.GetFramework()
-        return fw.GetPlayerFromIdentifier(identifier)
+        return Bridge.GetFramework().GetPlayerFromIdentifier(identifier)
     end
     return nil
 end
 
--- Get all players
+-- Get all players (always returns an array of server-side source IDs)
 function Bridge.GetPlayers()
-    if Bridge.IsQB() then
-        local fw = Bridge.GetFramework()
-        return fw.Functions.GetPlayers()
+    if Bridge.IsQBX() then
+        -- exports.qbx_core:GetQBPlayers() returns a table keyed by source;
+        -- normalise to an array of source IDs to match the qb/esx contract.
+        local out = {}
+        for src in pairs(exports.qbx_core:GetQBPlayers() or {}) do
+            out[#out + 1] = src
+        end
+        return out
+    elseif Bridge.Framework == 'qb' then
+        return Bridge.GetFramework().Functions.GetPlayers()
     elseif Bridge.IsESX() then
-        local fw = Bridge.GetFramework()
-        return fw.GetPlayers()
+        return Bridge.GetFramework().GetPlayers()
     end
     return {}
 end
@@ -266,8 +275,15 @@ end
 -- Society funds
 Bridge.Society = {}
 
+-- NOTE: qbx_management export names below are ASSUMED and pcall-guarded.
+-- Verify against the installed qbx_management on the box. These helpers are
+-- currently unused by the money path (see server/payment.lua which uses a
+-- server-side DB ledger), so an incorrect name degrades gracefully to 0/false.
 function Bridge.Society.GetBalance(society)
-    if Bridge.Resources.management == 'qb-management' then
+    if Bridge.Resources.management == 'qbx_management' then
+        local ok, res = pcall(function() return exports.qbx_management:GetAccountMoney(society) end)
+        return (ok and res) or 0
+    elseif Bridge.Resources.management == 'qb-management' then
         local result = MySQL.scalar.await('SELECT amount FROM management_funds WHERE job_name = ?', { society })
         return result or 0
     elseif Bridge.Resources.management == 'esx_society' then
@@ -278,7 +294,10 @@ function Bridge.Society.GetBalance(society)
 end
 
 function Bridge.Society.AddMoney(society, amount)
-    if Bridge.Resources.management == 'qb-management' then
+    if Bridge.Resources.management == 'qbx_management' then
+        local ok = pcall(function() exports.qbx_management:AddAccountMoney(society, amount) end)
+        return ok
+    elseif Bridge.Resources.management == 'qb-management' then
         exports['qb-management']:AddMoney(society, amount)
         return true
     elseif Bridge.Resources.management == 'esx_society' then
@@ -293,7 +312,10 @@ function Bridge.Society.AddMoney(society, amount)
 end
 
 function Bridge.Society.RemoveMoney(society, amount)
-    if Bridge.Resources.management == 'qb-management' then
+    if Bridge.Resources.management == 'qbx_management' then
+        local ok = pcall(function() exports.qbx_management:RemoveAccountMoney(society, amount) end)
+        return ok
+    elseif Bridge.Resources.management == 'qb-management' then
         exports['qb-management']:RemoveMoney(society, amount)
         return true
     elseif Bridge.Resources.management == 'esx_society' then
@@ -365,7 +387,12 @@ end
 
 -- Admin check
 function Bridge.IsAdmin(source)
-    if Bridge.IsQB() then
+    if Bridge.IsQBX() then
+        -- qbx_core has no Functions.HasPermission; use ace + qbx export if present
+        if IsPlayerAceAllowed(source, 'command') then return true end
+        local ok, res = pcall(function() return exports.qbx_core:HasPermission(source, 'admin') end)
+        return ok and res == true
+    elseif Bridge.Framework == 'qb' then
         local fw = Bridge.GetFramework()
         return fw.Functions.HasPermission(source, 'admin') or IsPlayerAceAllowed(source, 'command')
     elseif Bridge.IsESX() then

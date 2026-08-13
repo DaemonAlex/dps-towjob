@@ -3,12 +3,12 @@
     Duty tracking and clock in/out management
 ]]
 
-local QBCore = exports['qb-core']:GetCoreObject()
+-- Framework access goes through Bridge (qbx has no GetCoreObject on this box)
 
 -- Toggle duty status
 RegisterNetEvent('dps-towjob:server:toggleDuty', function(shopId)
     local source = source
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
 
     if not Player then return end
 
@@ -39,7 +39,7 @@ RegisterNetEvent('dps-towjob:server:toggleDuty', function(shopId)
         end
 
         DutyTracker[source] = nil
-        Player.Functions.SetJobDuty(false)
+        Bridge.SetDuty(source, false)
 
         lib.notify(source, {
             title = 'Tow Job',
@@ -70,7 +70,7 @@ RegisterNetEvent('dps-towjob:server:toggleDuty', function(shopId)
             lastTowCompleted = nil
         }
 
-        Player.Functions.SetJobDuty(true)
+        Bridge.SetDuty(source, true)
 
         lib.notify(source, {
             title = 'Tow Job',
@@ -86,18 +86,36 @@ RegisterNetEvent('dps-towjob:server:toggleDuty', function(shopId)
 end)
 
 -- Set driver state
+-- M1: validate against the enum AND the driver's current job. A client must
+-- not be able to flip itself to AVAILABLE while it still has an active job
+-- (which would let it grab a second assignment). Only AVAILABLE/BUSY may be
+-- set here; OFF_DUTY is controlled exclusively by toggleDuty.
 RegisterNetEvent('dps-towjob:server:setDriverState', function(state)
     local source = source
 
     if not DutyTracker[source] then return end
+    if type(state) ~= 'string' then return end
 
-    if not TowJob.DriverState[state:upper()] then
+    local normalized = TowJob.DriverState[state:upper()]
+    if not normalized then
         TowJob.Debug('Invalid driver state:', state)
         return
     end
 
-    DutyTracker[source].state = state
-    TowJob.Debug('Driver state changed:', source, state)
+    -- Only allow the two work states through this event.
+    if normalized ~= TowJob.DriverState.AVAILABLE and normalized ~= TowJob.DriverState.BUSY then
+        TowJob.Debug('Rejected driver state via setDriverState:', source, normalized)
+        return
+    end
+
+    -- Cannot become AVAILABLE while a job is still active.
+    if normalized == TowJob.DriverState.AVAILABLE and ActiveJobs[source] then
+        TowJob.Debug('Rejected AVAILABLE while job active:', source)
+        return
+    end
+
+    DutyTracker[source].state = normalized
+    TowJob.Debug('Driver state changed:', source, normalized)
 end)
 
 -- Get driver's shop
@@ -139,7 +157,7 @@ lib.callback.register('dps-towjob:server:getOnDutyDrivers', function(source)
     local drivers = {}
 
     for src, duty in pairs(DutyTracker) do
-        local Player = QBCore.Functions.GetPlayer(src)
+        local Player = Bridge.GetPlayer(src)
         if Player then
             table.insert(drivers, {
                 source = src,

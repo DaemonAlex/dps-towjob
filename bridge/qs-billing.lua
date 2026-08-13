@@ -42,11 +42,47 @@ end
 exports('CreateTowBill', CreateTowBill)
 
 -- Bill customer for service
+-- H4: gate on an on-duty tow driver, validate the target is a real, nearby,
+-- online player, and clamp the amount to config. Sender/amount are never
+-- trusted blindly. Works with or without qs-billing (direct-pay fallback).
 RegisterNetEvent('dps-towjob:server:billCustomer', function(customerSource, amount, description)
     local source = source
 
+    -- Sender must be an on-duty tow driver
+    if not IsDriverOnDuty(source) or not Bridge.HasJob(source, Config.JobName) then
+        TowJob.Debug('billCustomer rejected: not an on-duty tow driver', source)
+        return
+    end
+
+    -- Validate amount and clamp to config
+    amount = tonumber(amount)
+    if not amount or amount <= 0 then
+        TowJob.Debug('billCustomer rejected: bad amount', source, tostring(amount))
+        return
+    end
+    amount = math.min(math.floor(amount), Config.MaxBillAmount or 5000)
+
+    -- Target must be a real, connected player
+    customerSource = tonumber(customerSource)
     if not customerSource or customerSource == 0 then
         TowJob.Debug('No customer to bill')
+        return
+    end
+    if not Bridge.GetPlayer(customerSource) then
+        TowJob.Debug('billCustomer rejected: target not online', customerSource)
+        return
+    end
+
+    -- Target must be physically near the driver (server-side ped distance)
+    local driverPed = GetPlayerPed(source)
+    local customerPed = GetPlayerPed(customerSource)
+    if not driverPed or driverPed == 0 or not customerPed or customerPed == 0 then
+        return
+    end
+    local dist = #(GetEntityCoords(driverPed) - GetEntityCoords(customerPed))
+    if dist > (Config.MaxBillDistance or 20.0) then
+        TowJob.Debug('billCustomer rejected: target too far', source, customerSource, dist)
+        lib.notify(source, { title = 'Bill', description = 'Customer is too far away', type = 'error' })
         return
     end
 
@@ -65,8 +101,32 @@ RegisterNetEvent('dps-towjob:server:billCustomer', function(customerSource, amou
             type = 'inform'
         })
     else
-        -- Fallback: Direct payment if billing fails
-        TowJob.Debug('Billing failed, using direct payment')
+        -- Fallback: no billing resource — settle directly. Charge the customer
+        -- (cash then bank) and pay the driver. Amount already clamped above.
+        local custCash = Bridge.GetMoney(customerSource, 'cash')
+        local custBank = Bridge.GetMoney(customerSource, 'bank')
+        local payType = custCash >= amount and 'cash' or (custBank >= amount and 'bank' or nil)
+
+        if not payType then
+            lib.notify(source, { title = 'Bill', description = 'Customer cannot afford this', type = 'error' })
+            lib.notify(customerSource, { title = 'Bill', description = 'You cannot afford the tow charge', type = 'error' })
+            return
+        end
+
+        Bridge.RemoveMoney(customerSource, payType, amount)
+        Bridge.AddMoney(source, 'bank', amount)
+
+        lib.notify(source, {
+            title = 'Payment Received',
+            description = string.format('%s for %s', TowJob.FormatMoney(amount), description or 'service'),
+            type = 'success'
+        })
+        lib.notify(customerSource, {
+            title = 'Charged',
+            description = string.format('Tow service: %s', TowJob.FormatMoney(amount)),
+            type = 'inform'
+        })
+        TowJob.Debug('Direct-pay fallback settled:', source, customerSource, amount)
     end
 end)
 

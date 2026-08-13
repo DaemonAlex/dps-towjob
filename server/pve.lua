@@ -31,6 +31,11 @@ local PVEConfig = {
             fightChance = 0.30,     -- 30% of disputes turn violent
             bribeRange = { 50, 150 }, -- Bribe amount range
             bonusOnSuccess = 25,    -- Extra $ if you handle dispute
+            -- Server-authoritative settlement payout (C3). The NPC settlement
+            -- the driver receives is computed here from the job's commission,
+            -- NOT from any client-supplied amount.
+            settlementMultiplier = 1.75, -- payout = commission * this
+            settlementMax = 400,         -- hard cap on a single settlement
         }
     },
 
@@ -302,6 +307,17 @@ lib.callback.register('dps-towjob:server:checkDispute', function(source, jobId)
     local bribeMax = PVEConfig.predatory.dispute.bribeRange[2]
     local bribeAmount = math.random(bribeMin, bribeMax)
 
+    -- Server-side dispute gate (C3/C4): only mark a dispute active when the
+    -- driver actually has this predatory job active. disputeBonus and
+    -- settlementPaid require these flags, so a client cannot mint cash by
+    -- firing those events without a server-sanctioned dispute.
+    local activeJob = ActiveJobs and ActiveJobs[source]
+    if activeJob and activeJob.id == jobId and activeJob.type == 'predatory' then
+        activeJob.disputeActive = true
+        activeJob.disputeBonusPaid = false
+        activeJob.settled = false
+    end
+
     TowJob.Debug('Dispute triggered for job:', jobId, 'willFight:', willFight)
 
     return {
@@ -320,6 +336,12 @@ end)
 RegisterNetEvent('dps-towjob:server:payBribe', function(jobId, amount)
     local source = source
 
+    -- Validate/clamp amount: must be positive and within the configured bribe
+    -- range. Prevents a negative "removal" from crediting the player.
+    amount = tonumber(amount)
+    if not amount or amount <= 0 then return end
+    amount = math.floor(math.min(amount, PVEConfig.predatory.dispute.bribeRange[2]))
+
     -- Try cash first, then bank
     if Bridge.GetMoney(source, 'cash') >= amount then
         Bridge.RemoveMoney(source, 'cash', amount)
@@ -333,46 +355,91 @@ RegisterNetEvent('dps-towjob:server:payBribe', function(jobId, amount)
     TowJob.Debug('Player paid bribe:', source, amount)
 end)
 
--- Dispute bonus payment
+-- Dispute bonus payment (C4)
+-- Requires a server-sanctioned active predatory dispute, and pays at most once.
 RegisterNetEvent('dps-towjob:server:disputeBonus', function(jobId, reason)
     local source = source
-    local bonus = PVEConfig.predatory.dispute.bonusOnSuccess or 25
 
-    -- Add bonus to earnings
+    local job = ActiveJobs and ActiveJobs[source]
+    if not job or job.id ~= jobId or job.type ~= 'predatory' then
+        TowJob.Debug('disputeBonus rejected: no matching predatory job', source, jobId)
+        return
+    end
+    if not job.disputeActive then
+        TowJob.Debug('disputeBonus rejected: no active dispute', source, jobId)
+        return
+    end
+    if job.disputeBonusPaid then
+        TowJob.Debug('disputeBonus rejected: already paid', source, jobId)
+        return
+    end
+
+    -- Mark paid BEFORE granting money (idempotency)
+    job.disputeBonusPaid = true
+
+    local bonus = PVEConfig.predatory.dispute.bonusOnSuccess or 25
     Bridge.AddMoney(source, 'cash', bonus)
+
+    -- Log the outcome
+    local citizenid = Bridge.GetIdentifier(source)
+    MySQL.insert([[
+        INSERT INTO tow_dispute_logs (job_id, driver_id, outcome, resolved_at)
+        VALUES (?, ?, 'talked_down', NOW())
+    ]], { jobId, citizenid })
 
     TowJob.Debug('Dispute bonus paid:', source, bonus, reason)
 end)
 
--- Settlement payment (NPC pays to keep their car)
-RegisterNetEvent('dps-towjob:server:settlementPaid', function(jobId, amount)
+-- Settlement payment (NPC pays to keep their car) (C3)
+-- Server recomputes the payout from the job's commission; the client-sent
+-- amount is IGNORED. Requires an active dispute; pays once per job.
+RegisterNetEvent('dps-towjob:server:settlementPaid', function(jobId, _clientAmount)
     local source = source
 
-    -- Validate amount (anti-cheat)
-    if amount > 500 then
-        TowJob.Debug('Suspicious settlement amount:', source, amount)
-        amount = 200 -- Cap it
+    local job = ActiveJobs and ActiveJobs[source]
+    if not job or job.id ~= jobId or job.type ~= 'predatory' then
+        TowJob.Debug('settlement rejected: no matching predatory job', source, jobId)
+        return
     end
+    if not job.disputeActive then
+        TowJob.Debug('settlement rejected: no active dispute', source, jobId)
+        return
+    end
+    if job.settled then
+        TowJob.Debug('settlement rejected: already settled', source, jobId)
+        return
+    end
+
+    -- Consume the dispute and mark settled BEFORE paying (idempotency)
+    job.settled = true
+    job.disputeActive = false
+
+    -- Server-authoritative settlement amount from config + job commission
+    local commission = tonumber(job.commission) or PVEConfig.predatory.commission
+    local dispute = PVEConfig.predatory.dispute
+    local amount = math.floor(commission * (dispute.settlementMultiplier or 1.75))
+    amount = math.max(0, math.min(amount, dispute.settlementMax or 400))
 
     -- Pay the driver
     Bridge.AddMoney(source, 'cash', amount)
 
-    -- Cancel the job (vehicle released)
-    local job = ActiveJobs and ActiveJobs[source]
-    if job and job.id == jobId then
-        -- Remove from active jobs
-        ActiveJobs[source] = nil
-
-        -- Update driver state
-        if DutyTracker and DutyTracker[source] then
-            DutyTracker[source].state = TowJob.DriverState.AVAILABLE
-        end
-
-        -- Update database - mark as settled
-        MySQL.update.await([[
-            UPDATE tow_jobs SET state = 'settled', payment = ? WHERE id = ?
-        ]], { amount, jobId })
+    -- Close out the job (vehicle released)
+    ActiveJobs[source] = nil
+    if DutyTracker and DutyTracker[source] then
+        DutyTracker[source].state = TowJob.DriverState.AVAILABLE
     end
+
+    -- Update database - mark as settled
+    MySQL.update.await([[
+        UPDATE tow_jobs SET state = 'settled', payment = ? WHERE id = ?
+    ]], { amount, jobId })
+
+    -- Log the settlement outcome
+    local citizenid = Bridge.GetIdentifier(source)
+    MySQL.insert([[
+        INSERT INTO tow_dispute_logs (job_id, driver_id, outcome, settlement_amount, resolved_at)
+        VALUES (?, ?, 'settlement', ?, NOW())
+    ]], { jobId, citizenid, amount })
 
     -- Remove from PVE tracking
     for pveId, data in pairs(ActivePVE.predatory) do
@@ -382,7 +449,7 @@ RegisterNetEvent('dps-towjob:server:settlementPaid', function(jobId, amount)
         end
     end
 
-    TowJob.Debug('Settlement paid:', source, amount, jobId)
+    TowJob.Debug('Settlement paid (server-computed):', source, amount, jobId)
 
     -- Check queue for next job
     TriggerEvent('dps-towjob:server:checkQueue')
