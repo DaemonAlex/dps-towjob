@@ -157,6 +157,19 @@ RegisterNetEvent('dps-towjob:server:collectEarnings', function()
     if not Player then return end
 
     local citizenid = Player.PlayerData.citizenid
+
+    -- Reload from DB if the cache was evicted (e.g. after a reconnect), so
+    -- earned money is not stranded until the driver opens 'View Earnings' first.
+    if not DriverEarnings[citizenid] then
+        local result = MySQL.single.await('SELECT * FROM tow_driver_earnings WHERE citizenid = ?', { citizenid })
+        if result then
+            DriverEarnings[citizenid] = {
+                total = result.total_earned, uncollected = result.uncollected,
+                shop = result.shop, jobs = result.total_jobs
+            }
+        end
+    end
+
     local earnings = DriverEarnings[citizenid]
 
     if not earnings or earnings.uncollected <= 0 then

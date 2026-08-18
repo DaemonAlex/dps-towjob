@@ -91,7 +91,7 @@ RegisterNetEvent('dps-towjob:server:billCustomer', function(customerSource, amou
     if success then
         lib.notify(source, {
             title = 'Bill Sent',
-            description = string.format('Billed %s for %s', TowJob.FormatMoney(amount), description),
+            description = string.format('Billed %s for %s', TowJob.FormatMoney(amount), description or 'service'),
             type = 'success'
         })
 
@@ -201,8 +201,20 @@ RegisterNetEvent('dps-towjob:server:roadsideBill', function(customerSource, serv
 
     if not service then return end
 
+    -- Same trust boundary as billCustomer: only an on-duty driver, a clamped
+    -- amount (prefer the configured service price), and a nearby target.
+    if not IsDriverOnDuty(source) or not Bridge.HasJob(source, Config.JobName) then return end
+    amount = tonumber(service.price or amount)
+    if not amount or amount <= 0 then return end
+    amount = math.min(math.floor(amount), Config.MaxBillAmount or 5000)
+    local target = tonumber(customerSource)
+    if not target or not GetPlayerName(target) then return end
+    local dPed, cPed = GetPlayerPed(source), GetPlayerPed(target)
+    if dPed == 0 or cPed == 0 then return end
+    if #(GetEntityCoords(dPed) - GetEntityCoords(cPed)) > (Config.MaxBillDistance or 20.0) then return end
+
     local description = service.label .. ' - Roadside Service'
-    CreateTowBill(source, customerSource, amount, description)
+    CreateTowBill(source, target, amount, description)
 end)
 
 -- Callback for checking if player has pending tow bills
