@@ -100,6 +100,13 @@ local ActivePVE = {
     predatory = {}
 }
 
+-- ActivePVE.* are hash-keyed by id, so # is always 0; count keys for the caps.
+local function CountPVE(t)
+    local n = 0
+    for _ in pairs(t) do n = n + 1 end
+    return n
+end
+
 -- Generate random plate
 local function GeneratePlate()
     local chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -119,7 +126,7 @@ end
 
 -- Spawn NPC breakdown
 local function SpawnBreakdown()
-    if #ActivePVE.breakdowns >= PVEConfig.breakdowns.maxActive then return end
+    if CountPVE(ActivePVE.breakdowns) >= PVEConfig.breakdowns.maxActive then return end
 
     local availableDrivers = GetAvailableDrivers()
     if #availableDrivers == 0 then return end
@@ -158,7 +165,7 @@ end
 -- Spawn predatory tow opportunity
 local function SpawnPredatoryTow()
     if not PVEConfig.predatory.enabled then return end
-    if #ActivePVE.predatory >= PVEConfig.predatory.maxActive then return end
+    if CountPVE(ActivePVE.predatory) >= PVEConfig.predatory.maxActive then return end
 
     local availableDrivers = GetAvailableDrivers()
     if #availableDrivers == 0 then return end
@@ -289,6 +296,15 @@ lib.callback.register('dps-towjob:server:checkDispute', function(source, jobId)
 
     if not job or job.type ~= 'predatory' then
         return { triggered = false }
+    end
+
+    -- Once-per-job gate: a client could otherwise spam this callback to
+    -- re-roll the dispute until it triggers, then collect the settlement
+    -- payout without ever completing the tow.
+    local gateJob = ActiveJobs and ActiveJobs[source]
+    if gateJob then
+        if gateJob.disputeChecked then return { triggered = false } end
+        gateJob.disputeChecked = true
     end
 
     -- Roll for dispute
