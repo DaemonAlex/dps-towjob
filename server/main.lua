@@ -4,7 +4,7 @@
     Includes: Anti-spam, server-side validation, reliability rating
 ]]
 
-local QBCore = exports['qb-core']:GetCoreObject()
+-- Framework access goes through Bridge (qbx has no GetCoreObject on this box)
 
 -- Localize for performance
 local os_time = os.time
@@ -53,7 +53,7 @@ end
 
 -- Server-side validation: Check if player is valid tow driver
 local function ValidateTowDriver(source)
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
     if not Player then return false, 'Invalid player' end
 
     local job = Player.PlayerData.job
@@ -69,7 +69,9 @@ local function ValidateTowDriver(source)
 end
 
 -- Server-side validation: Verify player distance from coords
-local function ValidateDistance(source, targetCoords, maxDistance)
+-- GLOBAL so server/queue.lua, server/pve.lua etc. can enforce arrival checks.
+function ValidateDistance(source, targetCoords, maxDistance)
+    if not targetCoords then return false end
     local ped = GetPlayerPed(source)
     if not ped or ped == 0 then return false end
 
@@ -78,6 +80,7 @@ local function ValidateDistance(source, targetCoords, maxDistance)
 
     return dist <= maxDistance
 end
+exports('ValidateDistance', ValidateDistance)
 
 -- Initialize shop wait times
 CreateThread(function()
@@ -90,7 +93,7 @@ end)
 
 -- Get player job
 local function GetPlayerJob(source)
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
     if not Player then return nil end
     return Player.PlayerData.job
 end
@@ -129,7 +132,7 @@ end
 
 -- Get driver reliability rating
 function GetDriverRating(source)
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
     if not Player then return 100 end
 
     local citizenid = Player.PlayerData.citizenid
@@ -150,7 +153,7 @@ end
 
 -- Update driver reliability rating
 function UpdateDriverRating(source, change, reason)
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
     if not Player then return end
 
     local citizenid = Player.PlayerData.citizenid
@@ -246,6 +249,13 @@ AddEventHandler('playerDropped', function()
         table.insert(TowQueue, 1, job)
         ActiveJobs[source] = nil
         TowJob.Debug('Requeued job from disconnected driver:', job.id)
+    end
+
+    -- Evict per-citizen caches so they don't grow unbounded (L2).
+    -- Done last so the disconnect rating penalty above can read/write first.
+    if dutyData and dutyData.citizenid then
+        DriverRatings[dutyData.citizenid] = nil
+        DriverEarnings[dutyData.citizenid] = nil
     end
 end)
 
@@ -364,6 +374,24 @@ AddEventHandler('onResourceStart', function(resourceName)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ]])
 
+        -- Create dispute logs table (predatory towing confrontations) — M5.
+        -- server/pve.lua inserts into this on NPC arrest, so it must exist.
+        MySQL.query([[
+            CREATE TABLE IF NOT EXISTS `tow_dispute_logs` (
+                `id` INT AUTO_INCREMENT PRIMARY KEY,
+                `job_id` VARCHAR(20) NOT NULL,
+                `driver_id` VARCHAR(50) NULL,
+                `outcome` ENUM('talked_down', 'bribed', 'settlement', 'fought', 'abandoned', 'arrested', 'fled', 'timeout') NOT NULL,
+                `settlement_amount` INT DEFAULT 0,
+                `officer_source` INT NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `resolved_at` TIMESTAMP NULL,
+                INDEX `job_id` (`job_id`),
+                INDEX `driver_id` (`driver_id`),
+                INDEX `outcome` (`outcome`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ]])
+
         TowJob.Debug('Database tables initialized')
     end)
 end)
@@ -395,7 +423,7 @@ lib.callback.register('dps-towjob:server:getDriverStatus', function(source)
 end)
 
 lib.callback.register('dps-towjob:server:canClockIn', function(source, shopId)
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
     if not Player then return false, 'Player not found' end
 
     local job = Player.PlayerData.job
@@ -438,8 +466,20 @@ RegisterNetEvent('dps-towjob:server:impoundVehicle', function(plate, impoundId)
         return
     end
 
-    local citizenid = Player.PlayerData.citizenid
+    -- Authorization (M2): driver must have an active job and may only impound
+    -- the vehicle they were actually towing. Prevents impounding arbitrary plates.
     local job = ActiveJobs[source]
+    if not job then
+        lib.notify(source, { title = 'Error', description = 'No active tow job', type = 'error' })
+        return
+    end
+    if job.vehiclePlate and plate and job.vehiclePlate ~= plate then
+        TowJob.Debug('Impound plate mismatch:', source, 'job:', job.vehiclePlate, 'sent:', plate)
+        lib.notify(source, { title = 'Error', description = 'That is not the vehicle you towed', type = 'error' })
+        return
+    end
+
+    local citizenid = Player.PlayerData.citizenid
 
     -- Store in impound tracking
     MySQL.insert.await([[

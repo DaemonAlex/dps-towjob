@@ -3,8 +3,6 @@
     Clock in/out targets and depot interactions
 ]]
 
-local QBCore = exports['qb-core']:GetCoreObject()
-
 -- Create duty targets at shop depots
 CreateThread(function()
     Wait(2000) -- Wait for config to load

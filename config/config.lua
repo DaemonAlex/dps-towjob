@@ -24,6 +24,12 @@ Config.Payment = {
     pveMultiplier = 0.8,    -- PVE tows pay 80% of normal
 }
 
+-- Max amount a driver may bill/charge a customer in one invoice (server clamp).
+Config.MaxBillAmount = 5000
+
+-- Max distance (metres) between driver and customer for a bill to be valid.
+Config.MaxBillDistance = 20.0
+
 -- Queue settings
 Config.Queue = {
     maxSize = 50,           -- Max jobs in queue

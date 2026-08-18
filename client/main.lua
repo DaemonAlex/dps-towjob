@@ -3,8 +3,6 @@
     Core client initialization and state management
 ]]
 
-local QBCore = exports['qb-core']:GetCoreObject()
-
 -- Client state
 PlayerData = {}
 IsOnDuty = false
@@ -18,13 +16,13 @@ CreateThread(function()
         Wait(100)
     end
 
-    PlayerData = QBCore.Functions.GetPlayerData()
+    PlayerData = Bridge.GetPlayerData() or {}
     TowJob.Debug('Client initialized')
 end)
 
 -- Player data updates
 RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function()
-    PlayerData = QBCore.Functions.GetPlayerData()
+    PlayerData = Bridge.GetPlayerData() or {}
 end)
 
 RegisterNetEvent('QBCore:Client:OnJobUpdate', function(job)

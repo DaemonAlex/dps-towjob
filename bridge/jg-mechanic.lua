@@ -1,10 +1,21 @@
 --[[
     dps-towjob Bridge: jg-mechanic
     Integration with JG Scripts mechanic system
+
+    jg-mechanic is NOT installed on this box. Every jg-mechanic:server:* handler
+    below is soft-gated via JGActive() so the integration code (including the
+    LIKE-based service-ticket queries, M3) NEVER runs when jg-mechanic is absent.
+    The generic mechanic-count helpers only read job.onduty and are framework-safe.
 ]]
+
+-- True only when jg-mechanic is actually running.
+local function JGActive()
+    return GetResourceState('jg-mechanic') == 'started'
+end
 
 -- Listen for jg-mechanic duty changes
 RegisterNetEvent('jg-mechanic:server:toggle-duty', function()
+    if not JGActive() then return end
     local source = source
     local job = Bridge.GetPlayerJob(source)
 
@@ -124,6 +135,7 @@ exports('GetActiveRepairShops', GetActiveRepairShops)
 -- Hook for when mechanic starts/completes repair
 -- This allows tow system to track service completion
 RegisterNetEvent('jg-mechanic:server:repairStarted', function(vehiclePlate)
+    if not JGActive() then return end
     -- Update service ticket status if exists
     MySQL.update.await([[
         UPDATE tow_service_tickets SET status = 'in_progress' WHERE vehicle_data LIKE ? AND status = 'awaiting_repair'
@@ -133,6 +145,7 @@ RegisterNetEvent('jg-mechanic:server:repairStarted', function(vehiclePlate)
 end)
 
 RegisterNetEvent('jg-mechanic:server:repairCompleted', function(vehiclePlate, repairCost)
+    if not JGActive() then return end
     local source = source
     local citizenid = Bridge.GetIdentifier(source)
 

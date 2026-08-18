@@ -20,7 +20,7 @@ lua54 'yes'
 name 'dps-towjob'
 author 'DPS Development (Base: QBCore Team)'
 description 'Queue-based tow job system with jg-mechanic integration'
-version '2.7.0'
+version '2.8.0'
 
 shared_scripts {
     '@ox_lib/init.lua',
@@ -35,9 +35,8 @@ client_scripts {
     -- Bridge (load first)
     'bridge/init.lua',
     'bridge/client.lua',
-    'bridge/qs-billing_client.lua',
 
-    -- Core
+    -- Core (order matters: main defines globals used by all others)
     'client/main.lua',
     'client/duty.lua',
     'client/towing.lua',
@@ -45,6 +44,9 @@ client_scripts {
     'client/roadside.lua',
     'client/nui.lua',
     'client/dispute.lua',
+
+    -- Bridge integrations (client)
+    'bridge/qs-billing_client.lua',
 }
 
 server_scripts {
@@ -54,15 +56,15 @@ server_scripts {
     'bridge/init.lua',
     'bridge/server.lua',
 
-    -- Core
+    -- Core (order matters: main defines globals used by all others)
     'server/main.lua',
     'server/duty.lua',
     'server/queue.lua',
+    'server/pve.lua',
     'server/payment.lua',
     'server/dispatch.lua',
-    'server/pve.lua',
 
-    -- Integrations
+    -- Bridge integrations (server)
     'bridge/jg-mechanic.lua',
     'bridge/qs-billing.lua',
 }

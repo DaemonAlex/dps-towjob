@@ -3,6 +3,10 @@
 **Resource**: dps-towjob
 **Date**: 2025-12-30
 
+> **STATUS: PLANNED — NOT SHIPPED.** This document is a design proposal. None of
+> the code below is present in the resource as of v2.8.0. Treat it as a spec for
+> a future feature, not as documentation of shipped behavior.
+
 ---
 
 ## Overview

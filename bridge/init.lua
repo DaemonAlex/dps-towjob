@@ -27,16 +27,20 @@ end
 -- Framework object cache
 Bridge._fw = nil
 
+-- IMPORTANT: This target build of qbx_core does NOT expose GetCoreObject()
+-- (calling it throws). QBX is handled entirely via discrete exports
+-- (exports.qbx_core:GetPlayer / :GetQBPlayers / :GetPlayerByCitizenId) in
+-- bridge/server.lua and bridge/client.lua, so GetFramework() must NEVER call
+-- GetCoreObject for qbx. Only real qb-core and ESX return a shared object here.
 function Bridge.GetFramework()
     if Bridge._fw then return Bridge._fw end
 
-    if Bridge.Framework == 'qbx' then
-        Bridge._fw = exports['qbx_core']:GetCoreObject()
-    elseif Bridge.Framework == 'qb' then
+    if Bridge.Framework == 'qb' then
         Bridge._fw = exports['qb-core']:GetCoreObject()
     elseif Bridge.Framework == 'esx' then
         Bridge._fw = exports['es_extended']:getSharedObject()
     end
+    -- qbx intentionally returns nil (uses discrete exports instead)
 
     return Bridge._fw
 end
@@ -63,14 +67,16 @@ Bridge.Resources = {
                 GetResourceState('qs-inventory') == 'started' and 'qs-inventory' or
                 GetResourceState('qb-inventory') == 'started' and 'qb-inventory' or nil,
 
-    dispatch = GetResourceState('qs-dispatch') == 'started' and 'qs-dispatch' or
+    dispatch = GetResourceState('wasabi_mdt') == 'started' and 'wasabi_mdt' or
+               GetResourceState('qs-dispatch') == 'started' and 'qs-dispatch' or
                GetResourceState('ps-dispatch') == 'started' and 'ps-dispatch' or
                GetResourceState('cd_dispatch') == 'started' and 'cd_dispatch' or nil,
 
     billing = GetResourceState('qs-billing') == 'started' and 'qs-billing' or
               GetResourceState('qb-billing') == 'started' and 'qb-billing' or nil,
 
-    management = GetResourceState('qb-management') == 'started' and 'qb-management' or
+    management = GetResourceState('qbx_management') == 'started' and 'qbx_management' or
+                 GetResourceState('qb-management') == 'started' and 'qb-management' or
                  GetResourceState('esx_society') == 'started' and 'esx_society' or nil,
 
     jgMechanic = GetResourceState('jg-mechanic') == 'started'
