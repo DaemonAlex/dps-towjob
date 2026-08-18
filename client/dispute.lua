@@ -900,6 +900,17 @@ lib.callback.register('dps-towjob:client:triggerDispute', function(jobData, disp
     TriggerDispute(jobData, disputeData)
 end)
 
+-- L3: on resource stop/restart, delete any active dispute NPC so it doesn't
+-- orphan in the world.
+AddEventHandler('onResourceStop', function(resourceName)
+    if resourceName ~= GetCurrentResourceName() then return end
+
+    if ActiveDispute and ActiveDispute.ped and DoesEntityExist(ActiveDispute.ped) then
+        DeleteEntity(ActiveDispute.ped)
+    end
+    ActiveDispute = nil
+end)
+
 -- Export for towing.lua to check
 exports('CheckForDispute', CheckForDispute)
 exports('IsInDispute', function() return ActiveDispute ~= nil end)

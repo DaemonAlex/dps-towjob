@@ -9,13 +9,14 @@ if not Bridge then Bridge = {} end
 local PlayerData = nil
 
 -- Get player data
+-- qbx_core exposes GetPlayerData() as a discrete client export (no GetCoreObject).
 function Bridge.GetPlayerData()
-    if Bridge.IsQB() then
-        local fw = Bridge.GetFramework()
-        return fw.Functions.GetPlayerData()
+    if Bridge.IsQBX() then
+        return exports.qbx_core:GetPlayerData()
+    elseif Bridge.Framework == 'qb' then
+        return Bridge.GetFramework().Functions.GetPlayerData()
     elseif Bridge.IsESX() then
-        local fw = Bridge.GetFramework()
-        return fw.GetPlayerData()
+        return Bridge.GetFramework().GetPlayerData()
     end
     return nil
 end
@@ -220,8 +221,9 @@ function Bridge.HasItem(item, count)
         local hasItem = exports['qb-inventory']:HasItem(item, count)
         return hasItem
     else
-        -- Fallback to framework inventory
-        if Bridge.IsQB() then
+        -- Fallback to framework inventory (real qb-core only; qbx on this box
+        -- always resolves to ox_inventory above and never reaches here)
+        if Bridge.Framework == 'qb' then
             local fw = Bridge.GetFramework()
             local hasItem = fw.Functions.HasItem(item, count)
             return hasItem

@@ -3,12 +3,14 @@
     Integration with qs-dispatch for police/EMS tow requests
 ]]
 
-local QBCore = exports['qb-core']:GetCoreObject()
+-- Framework access goes through Bridge (qbx has no GetCoreObject on this box).
+-- NOTE: no standalone dispatch (ps/cd/qs) is installed on this box; the
+-- qs-dispatch:* listeners below are inert (never fire) and safe to keep.
 
 -- Handle tow request from qs-dispatch
 RegisterNetEvent('dps-towjob:server:dispatchRequest', function(data)
     local source = source
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
 
     if not Player then return end
 
@@ -73,7 +75,7 @@ end)
 -- Customer request from phone/mechanic call
 RegisterNetEvent('dps-towjob:server:customerRequest', function(coords, description)
     local source = source
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
 
     if not Player then return end
 
@@ -119,10 +121,10 @@ RegisterNetEvent('dps-towjob:server:notifyMechanics', function(shopId, data)
     local shop = Config.ShopJobMapping[shopId]
     if not shop or not shop.mechanicJob then return end
 
-    local players = QBCore.Functions.GetPlayers()
+    local players = Bridge.GetPlayers()
 
     for _, src in ipairs(players) do
-        local Player = QBCore.Functions.GetPlayer(src)
+        local Player = Bridge.GetPlayer(src)
         if Player then
             local job = Player.PlayerData.job
             if job.name == shop.mechanicJob and job.onduty then
@@ -141,7 +143,7 @@ end)
 -- Create service ticket when vehicle delivered to shop
 RegisterNetEvent('dps-towjob:server:createServiceTicket', function(shopId, vehicleData, customerData)
     local source = source
-    local Player = QBCore.Functions.GetPlayer(source)
+    local Player = Bridge.GetPlayer(source)
 
     if not Player then return end
 
