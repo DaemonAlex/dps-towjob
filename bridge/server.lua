@@ -349,7 +349,20 @@ end
 
 -- Dispatch integration
 function Bridge.SendDispatch(data)
-    if Bridge.Resources.dispatch == 'qs-dispatch' then
+    if Bridge.Resources.dispatch == 'wasabi_mdt' then
+        local ok = pcall(function()
+            exports['wasabi_mdt']:CreateDispatch({
+                type = 'disturbance',
+                title = data.message or 'Tow Request',
+                description = data.description,
+                code = data.code or 'TOW',
+                coords = data.coords,
+                location = data.street,
+                priority = 1,
+            })
+        end)
+        return ok
+    elseif Bridge.Resources.dispatch == 'qs-dispatch' then
         TriggerEvent('qs-dispatch:server:CreateDispatch', {
             job = data.jobs or { 'tow' },
             coords = data.coords,

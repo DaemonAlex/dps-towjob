@@ -473,8 +473,10 @@ RegisterNetEvent('dps-towjob:server:impoundVehicle', function(plate, impoundId)
         lib.notify(source, { title = 'Error', description = 'No active tow job', type = 'error' })
         return
     end
-    if job.vehiclePlate and plate and job.vehiclePlate ~= plate then
-        TowJob.Debug('Impound plate mismatch:', source, 'job:', job.vehiclePlate, 'sent:', plate)
+    -- Must have actually towed this plate: reject if no attached vehicle on the
+    -- job (nil vehiclePlate) or a mismatch - previously nil short-circuited the guard.
+    if not job.vehiclePlate or not plate or job.vehiclePlate ~= plate then
+        TowJob.Debug('Impound plate mismatch:', source, 'job:', tostring(job.vehiclePlate), 'sent:', tostring(plate))
         lib.notify(source, { title = 'Error', description = 'That is not the vehicle you towed', type = 'error' })
         return
     end
