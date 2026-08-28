@@ -4,9 +4,9 @@
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap');
 
 :root {
-  --cd-night:#0a0d18; --cd-deep:#0f1424; --cd-panel:#151b30; --cd-raised:#1b2340; --cd-border:#26304d;
+  --cd-night:#0c0e16; --cd-deep:#111522; --cd-panel:#171d2e; --cd-raised:#1f263c; --cd-border:#27304c;
   --cd-ink:#f4f1ea; --cd-dim:#aeb6d2;
-  --cd-sun:#ff7a45; --cd-sun2:#ffab6b; --cd-sun-dim:#2a1206;
+  --cd-sun:#ff7a45; --cd-sun2:#ffab6b; --cd-sun-dim:#101420;
   --cd-sea:#4ec9b0; --cd-cool:#5bc8e8;
   --cd-ok:#4ec98a; --cd-warn:#ffb347; --cd-bad:#ff6b6b;
 }

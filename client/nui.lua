@@ -127,19 +127,7 @@ RegisterCommand('dispatch', function()
     OpenDispatchUI()
 end, false)
 
--- F6 key only active for tow job players (does not reserve the key globally)
-CreateThread(function()
-    while true do
-        local sleep = 500
-        if PlayerData.job and PlayerData.job.name == Config.JobName then
-            sleep = 0
-            if IsControlJustPressed(0, 167) then -- 167 = F6
-                OpenDispatchUI()
-            end
-        end
-        Wait(sleep)
-    end
-end)
+-- F6 keybind removed 2026-08-22 per Damon: chat command only.
 
 -- Export
 exports('OpenDispatchUI', OpenDispatchUI)
