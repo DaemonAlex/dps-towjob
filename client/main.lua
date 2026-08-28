@@ -25,6 +25,21 @@ RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function()
     PlayerData = Bridge.GetPlayerData() or {}
 end)
 
+-- Reset ALL client state on logout/character switch. qbx_core emits this
+-- compat event on every logout; without this handler the previous
+-- character's job and duty flags leak across (a police character could
+-- open the tow menu after an earlier character had been on tow duty).
+RegisterNetEvent('QBCore:Client:OnPlayerUnload', function()
+    PlayerData = {}
+    IsOnDuty = false
+    CurrentShop = nil
+    CurrentJob = nil
+    CurrentVehicle = nil
+    RemoveJobBlip()
+    RemoveDestinationBlip()
+    CloseDispatchUI()
+end)
+
 RegisterNetEvent('QBCore:Client:OnJobUpdate', function(job)
     PlayerData.job = job
 
@@ -298,27 +313,7 @@ RegisterCommand('towmenu', function()
     OpenTowMenu()
 end, false)
 
--- F7 key only active for tow job players (does not reserve the key globally)
-CreateThread(function()
-    while true do
-        local sleep = 500
-        if PlayerData.job and PlayerData.job.name == Config.JobName then
-            sleep = 0
-            if IsControlJustPressed(0, 168) then -- 168 = F7
-                if IsOnDuty then
-                    OpenTowMenu()
-                else
-                    lib.notify({
-                        title = 'Tow Job',
-                        description = 'You must be on duty',
-                        type = 'error'
-                    })
-                end
-            end
-        end
-        Wait(sleep)
-    end
-end)
+-- F7 keybind removed 2026-08-22 per Damon: chat command only.
 
 function OpenTowMenu()
     local options = {}

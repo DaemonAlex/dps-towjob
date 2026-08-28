@@ -209,9 +209,11 @@ exports('GetShopOnDutyCount', function(shopId)
     return count
 end)
 
--- Player disconnect handling
-AddEventHandler('playerDropped', function()
-    local source = source
+-- Shared cleanup for disconnects AND character switches. qbx_core fires
+-- QBCore:Server:OnPlayerUnload on logout without a disconnect; before this
+-- was handled, a switched-away character stayed in DutyTracker and kept
+-- receiving dispatch offers.
+local function cleanupPlayer(source)
 
     -- Clean up cooldowns
     EventCooldowns[source] = nil
@@ -257,6 +259,14 @@ AddEventHandler('playerDropped', function()
         DriverRatings[dutyData.citizenid] = nil
         DriverEarnings[dutyData.citizenid] = nil
     end
+end
+
+AddEventHandler('playerDropped', function()
+    cleanupPlayer(source)
+end)
+
+AddEventHandler('QBCore:Server:OnPlayerUnload', function(src)
+    cleanupPlayer(src)
 end)
 
 -- Resource start
