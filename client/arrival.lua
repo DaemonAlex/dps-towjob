@@ -39,3 +39,6 @@ end)
 
 RegisterNetEvent('dps-towjob:client:jobCompleted', clearArrival)
 RegisterNetEvent('dps-towjob:client:jobCancelled', clearArrival)
+
+-- The arrival point belongs to the character who took the job.
+RegisterNetEvent('QBCore:Client:OnPlayerUnload', clearArrival)

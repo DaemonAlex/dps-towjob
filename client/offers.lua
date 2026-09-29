@@ -72,4 +72,11 @@ RegisterNetEvent('dps-towjob:client:jobAssigned', function()
     currentOffer = nil
 end)
 
+-- An open offer menu belongs to the character who was sent it. qbx_core fires
+-- this compat event on every logout and character switch.
+RegisterNetEvent('QBCore:Client:OnPlayerUnload', function()
+    currentOffer = nil
+    if lib.getOpenContextMenu() == 'tow_offer_menu' then lib.hideContext() end
+end)
+
 exports('GetCurrentOffer', function() return currentOffer end)
