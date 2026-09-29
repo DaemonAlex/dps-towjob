@@ -178,6 +178,7 @@ function TowLifecycle.publicView(job, queue, now)
         status = status,
         plate = job.vehiclePlate,
         model = job.vehicleModel,
+        code = job.vehicleCode,
         location = job.zone,
         destination = job.destinationLabel,
         fee = job.fee or 0,

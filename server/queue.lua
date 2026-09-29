@@ -29,6 +29,7 @@ function AddToQueue(request)
         kind = request.kind,
         fee = request.fee or 0,
         netId = request.netId,
+        vehicleCode = request.code,
         test = request.test,
         declined = {},
         -- Preserve PVE / predatory metadata so the server stays authoritative

@@ -96,6 +96,20 @@ local function requestService(source, data)
         if not owns then return false, 'not_owner' end
     end
 
+    local vehicleCode, vehicleLabel
+    local netId = tonumber(data.netId)
+    local entity = netId and NetworkGetEntityFromNetworkId(netId) or 0
+    if entity ~= 0 and DoesEntityExist(entity) and GetEntityType(entity) == 2 then
+        local ok, entry = pcall(function() return exports.qbx_core:GetVehiclesByHash(GetEntityModel(entity)) end)
+        if not ok or type(entry) ~= 'table' then entry = nil end
+        if entry and type(entry.model) == 'string' then
+            vehicleCode = entry.model:lower()
+            if type(entry.name) == 'string' and entry.name ~= '' then
+                vehicleLabel = ((type(entry.brand) == 'string' and entry.brand ~= '') and (entry.brand .. ' ') or '') .. entry.name
+            end
+        end
+    end
+
     local fee = TowLifecycle.feeFor(kind, Config.Requests)
     if fee > 0 and Bridge.GetMoney(source, 'bank') < fee then return false, 'no_funds' end
 
@@ -105,7 +119,8 @@ local function requestService(source, data)
         priority = TowJob.GetPriority(jobType),
         coords = coords,
         plate = plate,
-        model = TowLifecycle.sanitizeLabel(data.model, 30),
+        model = TowLifecycle.sanitizeLabel(vehicleLabel or data.model, 30),
+        code = vehicleCode,
         requesterId = citizenid,
         requesterSource = source,
         kind = kind,

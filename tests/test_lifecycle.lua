@@ -210,6 +210,13 @@ T.test('publicView keeps status after requeue', function()
     T.eq(view.status, 'queued'); T.eq(view.position, 1); T.eq(view.etaSeconds, nil)
 end)
 
+T.test('publicView carries the vehicle spawn code when the job has one', function()
+    local withCode = { id = 'B', kind = 'repair', state = 'queued', vehicleCode = 'sultan' }
+    T.eq(L.publicView(withCode, queueOf(withCode), 100).code, 'sultan')
+    local withoutCode = { id = 'C', kind = 'repair', state = 'queued' }
+    T.eq(L.publicView(withoutCode, queueOf(withoutCode), 100).code, nil)
+end)
+
 T.test('publicView carries no server ids or coordinates', function()
     local job = { id = 'B', kind = 'repair', state = 'queued', requesterSource = 4, requesterId = 'CID',
                   pickupCoords = { x = 1, y = 2, z = 3 }, assignedTo = 9, netId = 55 }

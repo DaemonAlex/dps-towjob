@@ -17,6 +17,7 @@ local function offerPayload(job)
         priority = job.priority,
         vehicleModel = job.vehicleModel,
         vehiclePlate = job.vehiclePlate,
+        vehicleCode = job.vehicleCode,
         violationText = job.violationText,
         commission = job.commission,
         coords = c and { x = c.x, y = c.y, z = c.z } or nil,
@@ -177,6 +178,7 @@ local function getDriverView(source)
             zone = active.zone,
             vehiclePlate = active.vehiclePlate,
             vehicleModel = active.vehicleModel,
+            vehicleCode = active.vehicleCode,
             destination = active.destinationLabel,
             coords = c and { x = c.x, y = c.y } or nil,
         }
