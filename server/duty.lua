@@ -40,6 +40,15 @@ RegisterNetEvent('dps-towjob:server:toggleDuty', function(shopId)
 
         if PendingOffers[source] then WithdrawOffer(source, 'offduty') end
         DutyTracker[source] = nil
+
+        if CityTowCheck then
+            local ids = {}
+            for i = 1, #TowQueue do
+                if TowQueue[i].kind then ids[#ids + 1] = TowQueue[i].id end
+            end
+            for i = 1, #ids do CityTowCheck(ids[i]) end
+        end
+
         Bridge.SetDuty(source, false)
 
         lib.notify(source, {

@@ -29,6 +29,7 @@ function AddToQueue(request)
         kind = request.kind,
         fee = request.fee or 0,
         netId = request.netId,
+        test = request.test,
         declined = {},
         -- Preserve PVE / predatory metadata so the server stays authoritative
         -- over commission (settlement math), dispatch display, and cleanup.
@@ -88,7 +89,7 @@ AddEventHandler('dps-towjob:server:checkQueue', function()
 
     for i = 1, #TowQueue do
         local job = TowQueue[i]
-        if job and not job.offeredTo and not job.cityTow then
+        if job and not job.offeredTo and not job.cityTow and not job.test then
             local driver = TowLifecycle.nextDriver(available, job)
             if driver and OfferJob(driver.source, job) then
                 for k = #available, 1, -1 do

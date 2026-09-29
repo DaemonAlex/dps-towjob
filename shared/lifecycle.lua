@@ -157,12 +157,15 @@ function TowLifecycle.feeFor(kind, cfg)
 end
 
 --- What City Tow does with the vehicle at hook time.
---- 'delete'  the right vehicle is at the pickup: remove it from the world
---- 'missing' no matching vehicle exists: finish the paperwork only
---- 'moved'   the vehicle was driven away: cancel the request
-function TowLifecycle.hookDecision(found, plateMatches, distance, maxDistance)
+--- 'delete'   the right vehicle is at the pickup, empty: remove it from the world
+--- 'missing'  no matching vehicle exists: cancel the request
+--- 'moved'    the vehicle was driven away: cancel the request
+--- 'occupied' someone is in the vehicle: cancel the request
+--- 'missing', 'moved' and 'occupied' all cancel the request; only 'delete' removes a vehicle.
+function TowLifecycle.hookDecision(found, plateMatches, distance, maxDistance, occupied)
     if not found or not plateMatches then return 'missing' end
     if distance and distance > maxDistance then return 'moved' end
+    if occupied then return 'occupied' end
     return 'delete'
 end
 

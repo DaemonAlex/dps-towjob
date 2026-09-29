@@ -173,6 +173,22 @@ T.test('hookDecision', function()
     T.eq(L.hookDecision(true, true, 31, 30), 'moved')
 end)
 
+T.test('hookDecision: occupied for found, plate match, in range, occupied = true', function()
+    T.eq(L.hookDecision(true, true, 5, 30, true), 'occupied')
+end)
+
+T.test('hookDecision: delete for found, plate match, in range, occupied = false', function()
+    T.eq(L.hookDecision(true, true, 5, 30, false), 'delete')
+end)
+
+T.test('hookDecision: moved (not occupied) for an occupied vehicle out of range', function()
+    T.eq(L.hookDecision(true, true, 31, 30, true), 'moved')
+end)
+
+T.test('hookDecision: missing (not occupied) when the plate does not match, occupied = true', function()
+    T.eq(L.hookDecision(true, false, 5, 30, true), 'missing')
+end)
+
 T.test('publicView: queued shows the place in line and hides the ETA', function()
     local job = { id = 'B', kind = 'repair', state = 'queued', zone = 'Zancudo Ave', fee = 200, createdAt = 50 }
     local view = L.publicView(job, queueOf({ id = 'A' }, job), 100)

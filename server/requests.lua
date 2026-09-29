@@ -91,6 +91,11 @@ local function requestService(source, data)
     local plate = TowLifecycle.sanitizeLabel(data.plate, 10)
     if plate == 'Unknown' then return false, 'no_vehicle' end
 
+    if kind ~= 'impound' then
+        local owns = MySQL.scalar.await('SELECT 1 FROM player_vehicles WHERE citizenid = ? AND plate = ? LIMIT 1', { citizenid, plate })
+        if not owns then return false, 'not_owner' end
+    end
+
     local fee = TowLifecycle.feeFor(kind, Config.Requests)
     if fee > 0 and Bridge.GetMoney(source, 'bank') < fee then return false, 'no_funds' end
 

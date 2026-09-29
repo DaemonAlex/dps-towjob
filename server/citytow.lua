@@ -33,16 +33,23 @@ end
 
 --- Look at the world and decide what to do with the vehicle. The net id may
 --- have been reused by another vehicle since the request, so the plate and
---- the distance from the pickup must both agree before anything is deleted.
+--- the distance from the pickup must both agree before anything is deleted,
+--- and nobody may be sitting in it.
 local function vehicleAtPickup(job)
     local entity = job.netId and NetworkGetEntityFromNetworkId(job.netId) or 0
     local found = entity ~= 0 and DoesEntityExist(entity) and GetEntityType(entity) == 2
-    local plateMatches, distance = false, nil
+    local plateMatches, distance, occupied = false, nil, false
     if found then
         plateMatches = trimPlate(GetVehicleNumberPlateText(entity)) == trimPlate(job.vehiclePlate)
         distance = #(GetEntityCoords(entity) - job.pickupCoords)
+        for seat = -1, 6 do
+            if GetPedInVehicleSeat(entity, seat) ~= 0 then
+                occupied = true
+                break
+            end
+        end
     end
-    return TowLifecycle.hookDecision(found, plateMatches, distance, 30.0), entity
+    return TowLifecycle.hookDecision(found, plateMatches, distance, Config.Requests.arriveRadius, occupied), entity
 end
 
 local function finish(job, state, reason)
@@ -58,19 +65,23 @@ local function cityDeliver(jobId)
     local job = CityTowJobs[jobId]
     if not job or job.state ~= TowJob.JobState.TOWING then return end
 
-    local destination = job.destination
-    if destination and destination.type == TowJob.DestinationType.IMPOUND then
-        RecordImpound(job.vehiclePlate, destination.id, 'CITYTOW', job.id)
-        MySQL.update('UPDATE tow_jobs SET dropoff_impound = ? WHERE id = ?', { destination.id, job.id })
-    elseif destination then
-        CreateServiceTicket(destination.id,
-            { plate = job.vehiclePlate, model = job.vehicleModel, owner = job.requesterId },
-            { citizenid = job.requesterId }, 'CITYTOW')
-    end
+    if job.test then
+        print(('[towtest] %s dry run: no impound, ticket or payment rows written'):format(job.id))
+    else
+        local destination = job.destination
+        if destination and destination.type == TowJob.DestinationType.IMPOUND then
+            RecordImpound(job.vehiclePlate, destination.id, 'CITYTOW', job.id)
+            MySQL.update('UPDATE tow_jobs SET dropoff_impound = ? WHERE id = ?', { destination.id, job.id })
+        elseif destination then
+            CreateServiceTicket(destination.id,
+                { plate = job.vehiclePlate, model = job.vehicleModel, owner = job.requesterId },
+                { citizenid = job.requesterId }, 'CITYTOW')
+        end
 
-    if job.feeCharged and (job.fee or 0) > 0 then
-        MySQL.insert('INSERT INTO tow_shop_transactions (shop, amount, type, description) VALUES (?, ?, ?, ?)',
-            { 'citytow', job.fee, 'tow_payment', 'Tow fee ' .. job.id })
+        if job.feeCharged and (job.fee or 0) > 0 then
+            MySQL.insert('INSERT INTO tow_shop_transactions (shop, amount, type, description) VALUES (?, ?, ?, ?)',
+                { 'citytow', job.fee, 'tow_payment', 'Tow fee ' .. job.id })
+        end
     end
 
     finish(job, TowJob.JobState.COMPLETED, nil)
@@ -80,15 +91,26 @@ local function cityHook(jobId)
     local job = CityTowJobs[jobId]
     if not job or job.state ~= TowJob.JobState.ON_SCENE then return end
 
-    local decision, entity = vehicleAtPickup(job)
-    if decision == 'moved' then
-        finish(job, TowJob.JobState.CANCELLED, 'vehicle_gone')
+    local decision, entity = 'delete', nil
+    if not job.test then
+        decision, entity = vehicleAtPickup(job)
+    end
+
+    if decision ~= 'delete' then
+        local reason = decision == 'occupied' and 'vehicle_occupied' or 'vehicle_gone'
+        finish(job, TowJob.JobState.CANCELLED, reason)
         return
     end
-    if decision == 'delete' then DeleteEntity(entity) end
+
+    ChooseDestination(job, nil)
+    if not job.destination then
+        finish(job, TowJob.JobState.CANCELLED, 'no_destination')
+        return
+    end
+
+    if not job.test then DeleteEntity(entity) end
 
     job.state = TowJob.JobState.TOWING
-    ChooseDestination(job, nil)
     ChargeRequestFee(job)
     MySQL.update('UPDATE tow_jobs SET state = ?, dropoff_coords = ? WHERE id = ?', {
         job.state, job.destination and json.encode(job.destination.coords) or nil, job.id,
@@ -135,7 +157,7 @@ end
 function CityTowCheck(jobId)
     local job = TowLifecycle.findInQueue(TowQueue, jobId)
     if not job then return end
-    local eligible = TowLifecycle.eligibleCount(GetAvailableDrivers(), job)
+    local eligible = job.test and 0 or TowLifecycle.eligibleCount(GetAvailableDrivers(), job)
     if TowLifecycle.shouldUseCityTow(job, eligible, os.time(), Config.Requests) then
         StartCityTow(job)
     end
@@ -165,6 +187,7 @@ RegisterCommand('towtest', function(source, args)
         kind = kind,
         fee = 0,
         locationLabel = 'Legion Square (console test)',
+        test = true,
     })
     if not added then
         print('[towtest] queue refused the job: ' .. tostring(jobId))
