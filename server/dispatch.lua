@@ -18,9 +18,10 @@ RegisterNetEvent('dps-towjob:server:dispatchRequest', function(data)
     local jobType = TowJob.JobTypes.CUSTOMER
 
     -- Determine priority based on job
-    if job.name == 'police' then
+    -- DPS 2026-09-25: job types from qbx_core (leo / ems) instead of vendor names
+    if job.type == 'leo' or job.name == 'police' then
         jobType = TowJob.JobTypes.POLICE
-    elseif job.name == 'ambulance' or job.name == 'ems' then
+    elseif job.type == 'ems' or job.name == 'sams' or job.name == 'omc' or job.name == 'rmc' then
         jobType = TowJob.JobTypes.EMS
     end
 

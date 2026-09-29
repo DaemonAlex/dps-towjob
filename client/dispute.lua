@@ -750,7 +750,7 @@ function MakeNPCArrestable(ped)
             icon = 'fas fa-handcuffs',
             label = 'Arrest Suspect',
             distance = 2.5,
-            groups = { 'police', 'bcso', 'sasp', 'sahp', 'lspd', 'sast' },
+            groups = { 'police', 'bcso', 'sasp', 'rpd', 'rcso' }, -- DPS 2026-09-25: patrol set (sahp/lspd/sast were not jobs)
             onSelect = function()
                 TriggerEvent('dps-towjob:client:policeArrest', ped)
             end
@@ -760,7 +760,7 @@ function MakeNPCArrestable(ped)
             icon = 'fas fa-user-lock',
             label = 'Detain Suspect',
             distance = 2.5,
-            groups = { 'police', 'bcso', 'sasp', 'sahp', 'lspd', 'sast' },
+            groups = { 'police', 'bcso', 'sasp', 'rpd', 'rcso' }, -- DPS 2026-09-25: patrol set (sahp/lspd/sast were not jobs)
             onSelect = function()
                 TriggerEvent('dps-towjob:client:policeDetain', ped)
             end
@@ -770,7 +770,7 @@ function MakeNPCArrestable(ped)
             icon = 'fas fa-comments',
             label = 'Question Suspect',
             distance = 3.0,
-            groups = { 'police', 'bcso', 'sasp', 'sahp', 'lspd', 'sast' },
+            groups = { 'police', 'bcso', 'sasp', 'rpd', 'rcso' }, -- DPS 2026-09-25: patrol set (sahp/lspd/sast were not jobs)
             onSelect = function()
                 TriggerEvent('dps-towjob:client:policeQuestion', ped)
             end
@@ -785,7 +785,7 @@ RegisterNetEvent('dps-towjob:client:policeArrest', function(ped)
     if not DoesEntityExist(ped) then return end
 
     -- Check if player is police
-    if not Bridge.HasJob('police') and not Bridge.HasJob('bcso') and not Bridge.HasJob('sasp') and not Bridge.HasJob('sahp') and not Bridge.HasJob('lspd') and not Bridge.HasJob('sast') then
+    if not Bridge.HasJob('police') and not Bridge.HasJob('bcso') and not Bridge.HasJob('sasp') and not Bridge.HasJob('rpd') and not Bridge.HasJob('rcso') then -- DPS 2026-09-25: patrol set
         Bridge.Notify('Error', 'You are not authorized', 'error')
         return
     end
