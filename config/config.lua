@@ -114,6 +114,9 @@ Config.Requests = {
     maxWaitSec = 180,         -- drivers on duty, nobody accepted: City Tow steps in
     repairTowFee = 200,       -- charged to the requester when the vehicle is hooked
     emergencyTowFee = 0,      -- police, EMS and fire impound requests
+    -- What the owner pays the garage script to take an impounded vehicle out
+    -- again. Written into impound_data.retrieval_cost. Change it to suit.
+    impoundReleaseFee = 500,
     emergencyJobTypes = { leo = true, ems = true },
     vehicleRange = 10.0,      -- the vehicle must be this close to the requester
     arriveRadius = 30.0,      -- a driver this close to the pickup has arrived

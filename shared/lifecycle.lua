@@ -166,6 +166,40 @@ function TowLifecycle.feeFor(kind, cfg)
     return cfg.repairTowFee
 end
 
+local function isOn(value)
+    return value == true or value == 1
+end
+
+--- The nearest place a towed car can be left, from the garage script's own
+--- `garage_locations` rows. wantKind is 'garage' or 'impound'. A garage must be
+--- public; every place must take cars and must not be disabled.
+--- places: { { name, kind, restriction_type, vehicle_type, disabled, x, y, z }, ... }
+function TowLifecycle.nearestPlace(places, coords, wantKind)
+    if type(places) ~= 'table' or type(coords) ~= 'table' then return nil end
+    local bestName, bestDistance
+    for i = 1, #places do
+        local p = places[i]
+        local usable = type(p) == 'table'
+            and type(p.name) == 'string' and p.name ~= ''
+            and p.kind == wantKind
+            and not isOn(p.disabled)
+            and (p.vehicle_type == nil or p.vehicle_type == 'car')
+            and (wantKind ~= 'garage' or p.restriction_type == 'public')
+            and type(p.x) == 'number' and type(p.y) == 'number'
+        if usable then
+            local dx = p.x - (coords.x or 0)
+            local dy = p.y - (coords.y or 0)
+            local dz = (p.z or 0) - (coords.z or 0)
+            local distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if not bestDistance or distance < bestDistance then
+                bestDistance = distance
+                bestName = p.name
+            end
+        end
+    end
+    return bestName
+end
+
 --- What happens to the tow fee when a request ends without the tow happening.
 --- 'none'    nothing was taken, so nothing goes back
 --- 'refund'  the fee was taken and the requester is here: pay it back now
@@ -204,6 +238,7 @@ function TowLifecycle.publicView(job, queue, now)
         code = job.vehicleCode,
         location = job.zone,
         destination = job.destinationLabel,
+        handoff = job.handoffLabel,
         fee = job.fee or 0,
         feeDue = job.feeDue == true,
         feeCharged = job.feeCharged == true,

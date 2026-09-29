@@ -175,6 +175,39 @@ T.test('cleanPlate gives one spelling for every comparison', function()
     T.eq(L.cleanPlate(42), nil)
 end)
 
+local PLACES = {
+    { name = 'Pillbox', kind = 'garage', restriction_type = 'public', vehicle_type = 'car', disabled = 0, x = 100, y = 0, z = 0 },
+    { name = 'Legion', kind = 'garage', restriction_type = 'public', vehicle_type = 'car', disabled = 0, x = 10, y = 0, z = 0 },
+    { name = 'Impound A', kind = 'impound', restriction_type = 'public', vehicle_type = 'car', disabled = 0, x = 400, y = 0, z = 0 },
+    { name = 'Impound B', kind = 'impound', restriction_type = 'public', vehicle_type = 'car', disabled = 0, x = 50, y = 0, z = 0 },
+}
+
+T.test('nearestPlace picks the closest place of the kind asked for', function()
+    T.eq(L.nearestPlace(PLACES, { x = 0, y = 0, z = 0 }, 'garage'), 'Legion')
+    T.eq(L.nearestPlace(PLACES, { x = 90, y = 0, z = 0 }, 'garage'), 'Pillbox')
+    T.eq(L.nearestPlace(PLACES, { x = 0, y = 0, z = 0 }, 'impound'), 'Impound B')
+    T.eq(L.nearestPlace(PLACES, { x = 500, y = 0, z = 0 }, 'impound'), 'Impound A')
+end)
+
+T.test('nearestPlace skips disabled, non-public and non-car places', function()
+    local mixed = {
+        { name = 'Closed', kind = 'garage', restriction_type = 'public', vehicle_type = 'car', disabled = 1, x = 1, y = 0, z = 0 },
+        { name = 'PD only', kind = 'garage', restriction_type = 'job', vehicle_type = 'car', disabled = 0, x = 2, y = 0, z = 0 },
+        { name = 'Hangar', kind = 'garage', restriction_type = 'public', vehicle_type = 'air', disabled = 0, x = 3, y = 0, z = 0 },
+        { name = 'Docks', kind = 'garage', restriction_type = 'public', vehicle_type = 'sea', disabled = 0, x = 4, y = 0, z = 0 },
+        { name = 'Open', kind = 'garage', restriction_type = 'public', vehicle_type = 'car', disabled = 0, x = 900, y = 0, z = 0 },
+    }
+    T.eq(L.nearestPlace(mixed, { x = 0, y = 0, z = 0 }, 'garage'), 'Open')
+end)
+
+T.test('nearestPlace answers nil when there is nowhere to put the car', function()
+    T.eq(L.nearestPlace({}, { x = 0, y = 0, z = 0 }, 'garage'), nil)
+    T.eq(L.nearestPlace(PLACES, { x = 0, y = 0, z = 0 }, 'hangar'), nil)
+    T.eq(L.nearestPlace(nil, { x = 0, y = 0, z = 0 }, 'garage'), nil)
+    T.eq(L.nearestPlace(PLACES, nil, 'garage'), nil)
+    T.eq(L.nearestPlace({ { name = 'No coords', kind = 'garage', restriction_type = 'public' } }, { x = 0, y = 0, z = 0 }, 'garage'), nil)
+end)
+
 T.test('refundDecision: a fee that was taken comes back', function()
     local charged = { kind = 'repair', fee = 200, feeCharged = true }
     T.eq(L.refundDecision(charged, true), 'refund')

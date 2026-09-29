@@ -178,6 +178,13 @@ local function requestService(source, data)
     local job = TowLifecycle.findInQueue(TowQueue, jobId)
     if not job then return false, 'queue_full' end
 
+    -- Kept on the job so the impound record still names the caller when they
+    -- have logged off by the time the vehicle is delivered.
+    local charinfo = pdata.charinfo or {}
+    job.requesterName = TowLifecycle.sanitizeLabel(
+        ((charinfo.firstname or '') .. ' ' .. (charinfo.lastname or '')), 50)
+    job.requesterJobLabel = TowLifecycle.sanitizeLabel(pdata.job and pdata.job.label, 50)
+
     OpenRequests[citizenid] = job
     LastRequestAt[citizenid] = now
     MySQL.update('UPDATE tow_jobs SET kind = ?, fee = ? WHERE id = ?', { kind, fee, jobId })

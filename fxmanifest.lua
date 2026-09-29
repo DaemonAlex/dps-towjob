@@ -67,6 +67,7 @@ server_scripts {
     'server/payment.lua',
     'server/dispatch.lua',
     'server/requests.lua',
+    'server/handoff.lua',
     'server/offers.lua',
     'server/citytow.lua',
 

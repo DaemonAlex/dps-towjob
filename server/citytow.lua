@@ -91,6 +91,11 @@ local function cityDeliver(jobId)
             MySQL.insert('INSERT INTO tow_shop_transactions (shop, amount, type, description) VALUES (?, ?, ?, ?)',
                 { 'citytow', job.fee, 'tow_payment', 'Tow fee ' .. job.id })
         end
+
+        -- The car has to be somewhere the owner can reach it, and persistence
+        -- has to stop holding it. Before finish(), so the app's "delivered"
+        -- message already carries the place.
+        if HandOffVehicle then HandOffVehicle(job) end
     end
 
     finish(job, TowJob.JobState.COMPLETED, nil)

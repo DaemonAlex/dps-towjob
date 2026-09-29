@@ -315,6 +315,9 @@ RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
         local driverShop = GetDriverShop(source)
         if driverShop then AddToShopFund(driverShop, job.fee, 'Tow fee ' .. job.id) end
     end
+    -- The vehicle has to end up where the app says it is. Once per job, before
+    -- the requester is told it was delivered.
+    if job.kind and HandOffVehicle then HandOffVehicle(job) end
     PublishRequest(job)
     job.completedAt = os.time()
 
