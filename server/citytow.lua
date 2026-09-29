@@ -42,7 +42,7 @@ local function vehicleAtPickup(job)
     if found then
         plateMatches = trimPlate(GetVehicleNumberPlateText(entity)) == trimPlate(job.vehiclePlate)
         distance = #(GetEntityCoords(entity) - job.pickupCoords)
-        for seat = -1, 6 do
+        for seat = -1, 15 do
             if GetPedInVehicleSeat(entity, seat) ~= 0 then
                 occupied = true
                 break
@@ -158,7 +158,14 @@ function CityTowCheck(jobId)
     local job = TowLifecycle.findInQueue(TowQueue, jobId)
     if not job then return end
     local eligible = job.test and 0 or TowLifecycle.eligibleCount(GetAvailableDrivers(), job)
-    if TowLifecycle.shouldUseCityTow(job, eligible, os.time(), Config.Requests) then
+    local cfg = Config.Requests
+    if job.timeScale then
+        cfg = {
+            noDriverGraceSec = math.floor(cfg.noDriverGraceSec * job.timeScale),
+            maxWaitSec = math.floor(cfg.maxWaitSec * job.timeScale),
+        }
+    end
+    if TowLifecycle.shouldUseCityTow(job, eligible, os.time(), cfg) then
         StartCityTow(job)
     end
 end
