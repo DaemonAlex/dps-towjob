@@ -63,6 +63,8 @@ RegisterNetEvent('dps-towjob:client:offerWithdrawn', function(jobId, reason)
         lib.notify({ title = 'Tow Request', description = 'The request went to another driver', type = 'inform' })
     elseif reason == 'cancelled' then
         lib.notify({ title = 'Tow Request', description = 'The caller cancelled', type = 'inform' })
+    elseif reason == 'citytow' then
+        lib.notify({ title = 'Tow Request', description = 'City Tow took that request', type = 'inform' })
     end
 end)
 

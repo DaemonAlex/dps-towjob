@@ -28,11 +28,10 @@ function PublishRequest(job)
 
     TriggerEvent('dps-towjob:requestUpdate', job.requesterId, view, changed)
 
-    local src = sourceFor(job.requesterId)
-    job.requesterSource = src
-    if src then
-        TriggerClientEvent('dps-towjob:client:requestUpdate', src, view, changed)
-    end
+    -- Kept because roadside billing reads it. Nothing is sent to the client
+    -- here: the app gets the same view through the server event above, and
+    -- every queue change used to send this to every waiting player for nothing.
+    job.requesterSource = sourceFor(job.requesterId)
 end
 
 --- Tell everyone still waiting what their place in line is now.
