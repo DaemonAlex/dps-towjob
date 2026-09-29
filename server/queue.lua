@@ -243,10 +243,23 @@ RegisterNetEvent('dps-towjob:server:vehicleAttached', function(jobId, vehicleDat
         return
     end
 
+    local sentPlate = TowLifecycle.sanitizeLabel(vehicleData.plate, 10)
+    if job.kind then
+        -- A player request keeps what the server recorded when it was made.
+        -- The driver's client may only confirm it is the same vehicle.
+        local want = (job.vehiclePlate or ''):gsub('%s+', ''):upper()
+        local got = (sentPlate == 'Unknown' and '' or sentPlate):gsub('%s+', ''):upper()
+        if want == '' or got ~= want then
+            Bridge.Notify(source, 'Tow', 'That is not the vehicle on this request. Check the plate.', 'error')
+            TowJob.Debug('Rejected vehicleAttached: plate mismatch', source, jobId)
+            return
+        end
+    else
+        job.vehiclePlate = sentPlate
+        job.vehicleModel = TowLifecycle.sanitizeLabel(vehicleData.model, 30)
+        job.pickupLocation = TowLifecycle.sanitizeLabel(vehicleData.location, 60)
+    end
     job.state = TowJob.JobState.TOWING
-    job.vehiclePlate = vehicleData.plate
-    job.vehicleModel = vehicleData.model
-    job.pickupLocation = vehicleData.location
 
     ChooseDestination(job, source)
     job.etaAt = nil
