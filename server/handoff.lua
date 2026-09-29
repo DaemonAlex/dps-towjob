@@ -66,21 +66,24 @@ local function loadPlaces()
     return places
 end
 
---- The owner's row, found by the plate however it is spelled.
+--- The owner's row, found by the plate however it is spelled. Ordered, so two
+--- rows that differ only by their padding always resolve to the same one.
 local function ownedVehicle(plate)
     local ok, row = pcall(function()
         return MySQL.single.await([[
-            SELECT plate, citizenid, garage_id FROM player_vehicles
-            WHERE REPLACE(plate, ' ', '') = ? LIMIT 1
+            SELECT plate, citizenid, garage_id, in_garage FROM player_vehicles
+            WHERE REPLACE(plate, ' ', '') = ? ORDER BY id LIMIT 1
         ]], { plate })
     end)
     if not ok or type(row) ~= 'table' then return nil end
     return row
 end
 
+--- The garage script's own store statement and nothing else: a repair tow does
+--- not touch the impound columns.
 local function storeInGarage(row, garageName)
     MySQL.update.await([[
-        UPDATE player_vehicles SET in_garage = 1, garage_id = ?, impound = 0 WHERE plate = ?
+        UPDATE player_vehicles SET in_garage = 1, garage_id = ? WHERE plate = ?
     ]], { garageName, row.plate })
 end
 
@@ -132,17 +135,21 @@ function HandOffVehicle(job)
     local placeName = TowLifecycle.nearestPlace(loadPlaces(), dropoff, impound and 'impound' or 'garage')
     local row = ownedVehicle(plate)
 
-    if row and placeName then
-        if impound then
-            putInImpound(row, job, placeName)
-            job.handoffLabel = placeName
-            tellOwner(row, job, plate, placeName)
-        else
-            storeInGarage(row, placeName)
-            job.handoffLabel = placeName .. ' garage'
-        end
-    elseif row then
-        TowJob.Debug('No place found for the hand-off of', plate, 'job', job.id)
+    local action = TowLifecycle.handoffAction(job.kind, row)
+    if action == 'in_garage' then
+        -- The row says the car is parked in a garage, so this is not the car
+        -- that was towed. Leave the owner's row alone.
+        print(('[dps-towjob] hand-off skipped: %s is already in a garage, impound row not written (job %s)')
+            :format(plate, tostring(job.id)))
+    elseif not placeName then
+        if row then TowJob.Debug('No place found for the hand-off of', plate, 'job', job.id) end
+    elseif action == 'impound' then
+        putInImpound(row, job, placeName)
+        job.handoffLabel = placeName
+        tellOwner(row, job, plate, placeName)
+    elseif action == 'garage' then
+        storeInGarage(row, placeName)
+        job.handoffLabel = placeName .. ' garage'
     end
 
     -- An unowned or job vehicle has no row to move, but persistence still has

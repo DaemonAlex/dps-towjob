@@ -208,6 +208,19 @@ T.test('nearestPlace answers nil when there is nowhere to put the car', function
     T.eq(L.nearestPlace({ { name = 'No coords', kind = 'garage', restriction_type = 'public' } }, { x = 0, y = 0, z = 0 }, 'garage'), nil)
 end)
 
+T.test('handoffAction: a repair tow is stored, an impound tow is filed', function()
+    T.eq(L.handoffAction('repair', { plate = 'ABC', in_garage = 0 }), 'garage')
+    T.eq(L.handoffAction('impound', { plate = 'ABC', in_garage = 0 }), 'impound')
+    T.eq(L.handoffAction('impound', { plate = 'ABC' }), 'impound')
+end)
+
+T.test('handoffAction: nothing is written without a row, or for a car already in a garage', function()
+    T.eq(L.handoffAction('repair', nil), 'none')
+    T.eq(L.handoffAction('impound', nil), 'none')
+    T.eq(L.handoffAction('impound', { plate = 'ABC', in_garage = 1 }), 'in_garage')
+    T.eq(L.handoffAction('impound', { plate = 'ABC', in_garage = true }), 'in_garage')
+end)
+
 T.test('refundDecision: a fee that was taken comes back', function()
     local charged = { kind = 'repair', fee = 200, feeCharged = true }
     T.eq(L.refundDecision(charged, true), 'refund')

@@ -200,6 +200,20 @@ function TowLifecycle.nearestPlace(places, coords, wantKind)
     return bestName
 end
 
+--- What the hand-off should do with the owner's `player_vehicles` row.
+--- 'none'       no row: an unowned or job vehicle, nothing to file
+--- 'garage'     a repair tow: store it in a garage
+--- 'impound'    an impound tow: file it in the lot
+--- 'in_garage'  an impound tow whose row is already in a garage. A car cannot be
+---              in the world and in a garage at once, so the row is left alone
+---              rather than dragging the owner's garaged copy into the lot.
+function TowLifecycle.handoffAction(kind, row)
+    if type(row) ~= 'table' then return 'none' end
+    if kind ~= 'impound' then return 'garage' end
+    if isOn(row.in_garage) then return 'in_garage' end
+    return 'impound'
+end
+
 --- What happens to the tow fee when a request ends without the tow happening.
 --- 'none'    nothing was taken, so nothing goes back
 --- 'refund'  the fee was taken and the requester is here: pay it back now
