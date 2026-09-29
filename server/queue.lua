@@ -178,6 +178,19 @@ RegisterNetEvent('dps-towjob:server:arrivedOnScene', function(jobId)
     TowJob.Debug('Driver on scene:', job.id)
 end)
 
+local RealJob = {}   -- job name -> true / false, asked once per server run
+
+--- Is this the name of a job somebody can actually hold on this server? Four
+--- shops in config/shops.lua name vendor jobs that do not exist here, so a car
+--- sent to them lands in a queue nobody can ever open.
+local function jobExists(name)
+    if type(name) ~= 'string' or name == '' then return false end
+    if RealJob[name] ~= nil then return RealJob[name] end
+    local ok, job = pcall(function() return exports.qbx_core:GetJob(name) end)
+    RealJob[name] = ok and job ~= nil
+    return RealJob[name]
+end
+
 --- Where a hooked vehicle goes. Impound requests go to the nearest impound lot,
 --- everything else to a repair shop. driverSource is nil for City Tow.
 function ChooseDestination(job, driverSource)
@@ -195,7 +208,7 @@ function ChooseDestination(job, driverSource)
     if not shopId then
         local best
         for id, shop in pairs(Config.ShopJobMapping) do
-            if shop.towShop and shop.vehicleDropoff then
+            if shop.towShop and shop.vehicleDropoff and jobExists(shop.mechanicJob) then
                 local d = #(shop.vehicleDropoff - job.pickupCoords)
                 if not best or d < best then
                     best = d

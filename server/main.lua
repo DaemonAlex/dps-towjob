@@ -26,6 +26,8 @@ local EventCooldowns = {}
 local COOLDOWN_TIMES = {
     ['vehicleAttached'] = 5000,    -- 5 seconds between attach events
     ['completeJob'] = 10000,       -- 10 seconds between completions
+    ['impoundVehicle'] = 10000,    -- 10 seconds between impound records (its own
+                                   -- key: the client sends both in one frame)
     ['cancelJob'] = 30000,         -- 30 seconds between cancellations
     ['toggleDuty'] = 5000,         -- 5 seconds between duty toggles
     ['collectEarnings'] = 60000,   -- 1 minute between earnings collections
@@ -500,8 +502,9 @@ end
 RegisterNetEvent('dps-towjob:server:impoundVehicle', function(plate, impoundId)
     local source = source
 
-    -- Validate
-    if IsOnCooldown(source, 'completeJob') then return end
+    -- Validate. Its own cooldown key: the client sends impoundVehicle and
+    -- completeJob back to back, so a shared key refused the second of them.
+    if IsOnCooldown(source, 'impoundVehicle') then return end
 
     local valid, Player = ValidateTowDriver(source)
     if not valid then return end
@@ -527,13 +530,18 @@ RegisterNetEvent('dps-towjob:server:impoundVehicle', function(plate, impoundId)
     end
     -- Must have actually towed this plate: reject if no attached vehicle on the
     -- job (nil vehiclePlate) or a mismatch - previously nil short-circuited the guard.
-    if not job.vehiclePlate or not plate or job.vehiclePlate ~= plate then
+    -- Compared the same way the hook compares it: the game pads a plate shorter
+    -- than eight characters, so an exact match lost every vanity plate.
+    local want = TowLifecycle.cleanPlate(job.vehiclePlate)
+    local sent = TowLifecycle.cleanPlate(plate)
+    if not want or sent ~= want then
         TowJob.Debug('Impound plate mismatch:', source, 'job:', tostring(job.vehiclePlate), 'sent:', tostring(plate))
         lib.notify(source, { title = 'Error', description = 'That is not the vehicle you towed', type = 'error' })
         return
     end
 
-    RecordImpound(plate, impoundId, Player.PlayerData.citizenid, job.id)
+    -- The server's own record of the plate, never the client's text.
+    RecordImpound(job.vehiclePlate, impoundId, Player.PlayerData.citizenid, job.id)
 end)
 
 -- Get vehicle impound location

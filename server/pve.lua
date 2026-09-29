@@ -262,6 +262,22 @@ local function CleanupPVE()
     end
 end
 
+--- Take an AI call off the board. Called when every on-duty driver has passed
+--- on it: until now a declined or timed-out call stayed in the queue, was never
+--- offered to that driver again, and still counted against the cap, so three
+--- missed breakdowns stopped every breakdown call for half an hour.
+function DropAiCall(job)
+    if type(job) ~= 'table' or job.kind then return false end
+    TowLifecycle.removeFromQueue(TowQueue, job.id)
+    if job.pveId then
+        ActivePVE.breakdowns[job.pveId] = nil
+        ActivePVE.predatory[job.pveId] = nil
+    end
+    MySQL.update('UPDATE tow_jobs SET state = ? WHERE id = ?', { TowJob.JobState.CANCELLED, job.id })
+    TowJob.Debug('AI call dropped, every on-duty driver passed on it:', job.id)
+    return true
+end
+
 -- PVE job completed handler
 RegisterNetEvent('dps-towjob:server:pveCompleted', function(pveId, pveType)
     if pveType == 'breakdown' then

@@ -61,6 +61,14 @@ function WithdrawOffer(source, reason, job)
     if reason == 'timeout' or reason == 'declined' or reason == 'disconnect' or reason == 'offduty' then
         if job and job.kind and CityTowCheck then CityTowCheck(job.id) end
     end
+
+    -- An AI call has no City Tow to fall back on. Once every driver on duty has
+    -- passed on it, it leaves the board instead of blocking a slot for 30 min.
+    if job and not job.kind and (reason == 'timeout' or reason == 'declined')
+        and DropAiCall and GetDutyDrivers
+        and TowLifecycle.eligibleCount(GetDutyDrivers(), job) == 0 then
+        DropAiCall(job)
+    end
 end
 
 function OfferJob(source, job)

@@ -138,6 +138,16 @@ end
 
 exports('GetDriverShop', GetDriverShop)
 
+--- Everyone clocked in right now, busy or not, in the shape the lifecycle
+--- helpers expect. Used to decide whether a job has run out of drivers.
+function GetDutyDrivers()
+    local drivers = {}
+    for src, duty in pairs(DutyTracker) do
+        drivers[#drivers + 1] = { source = src, citizenid = duty.citizenid }
+    end
+    return drivers
+end
+
 -- Check if driver is on duty
 function IsDriverOnDuty(source)
     return DutyTracker[source] ~= nil
@@ -153,8 +163,9 @@ end
 
 exports('GetDriverState', GetDriverState)
 
--- Sync with QBCore duty changes
-RegisterNetEvent('QBCore:Server:OnJobUpdate', function(source, job)
+-- Sync with QBCore duty changes. A server-side handler only: as a net event any
+-- client could send another driver's id and knock them off duty.
+AddEventHandler('QBCore:Server:OnJobUpdate', function(source, job)
     if job.name ~= Config.JobName then
         -- Player changed jobs, remove from duty tracker
         if DutyTracker[source] then
