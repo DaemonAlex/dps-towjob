@@ -132,17 +132,10 @@ function AssignJobToDriver(source, job)
     -- Notify driver
     TriggerClientEvent('dps-towjob:client:jobAssigned', source, job)
 
-    -- Notify requester if applicable
-    if job.requesterSource then
-        local Player = assignPlayer
-        local driverName = Player and (Player.PlayerData.charinfo.firstname .. ' ' .. Player.PlayerData.charinfo.lastname) or 'A driver'
-
-        TriggerClientEvent('ox_lib:notify', job.requesterSource, {
-            title = 'Tow Service',
-            description = 'Driver ' .. driverName .. ' is en route',
-            type = 'success'
-        })
-    end
+    local charinfo = assignPlayer and assignPlayer.PlayerData and assignPlayer.PlayerData.charinfo
+    job.driverName = charinfo and (charinfo.firstname .. ' ' .. charinfo.lastname) or 'A driver'
+    PublishRequest(job)
+    PublishQueuePositions()
 
     TowJob.Debug('Job assigned:', job.id, 'to driver:', source)
 end
@@ -168,6 +161,7 @@ RegisterNetEvent('dps-towjob:server:acceptJob', function(jobId)
     ]], { job.state, job.id })
 
     TriggerClientEvent('dps-towjob:client:jobStateChanged', source, job)
+    PublishRequest(job)
     TowJob.Debug('Job accepted:', job.id)
 end)
 
@@ -177,16 +171,55 @@ RegisterNetEvent('dps-towjob:server:arrivedOnScene', function(jobId)
     local job = ActiveJobs[source]
 
     if not job or job.id ~= jobId then return end
+    if job.state ~= TowJob.JobState.ASSIGNED and job.state ~= TowJob.JobState.EN_ROUTE then return end
+    if not ValidateDistance(source, job.pickupCoords, Config.Requests.arriveRadius + 15.0) then return end
 
     job.state = TowJob.JobState.ON_SCENE
+    job.etaAt = nil
 
     MySQL.update.await([[
         UPDATE tow_jobs SET state = ? WHERE id = ?
     ]], { job.state, job.id })
 
     TriggerClientEvent('dps-towjob:client:jobStateChanged', source, job)
+    PublishRequest(job)
     TowJob.Debug('Driver on scene:', job.id)
 end)
+
+--- Where a hooked vehicle goes. Impound requests go to the nearest impound lot,
+--- everything else to a repair shop. driverSource is nil for City Tow.
+function ChooseDestination(job, driverSource)
+    if job.type == TowJob.JobTypes.POLICE or job.type == TowJob.JobTypes.EMS or job.kind == 'impound' then
+        local impoundId = GetNearestImpound(job.pickupCoords)
+        local lot = impoundId and Config.ImpoundLots[impoundId]
+        if lot then
+            job.destination = { type = TowJob.DestinationType.IMPOUND, id = impoundId, coords = lot.dropoff }
+            job.destinationLabel = lot.label or impoundId
+            return job.destination
+        end
+    end
+
+    local shopId = GetNextRepairShop() or (driverSource and GetDriverShop(driverSource)) or nil
+    if not shopId then
+        local best
+        for id, shop in pairs(Config.ShopJobMapping) do
+            if shop.towShop and shop.vehicleDropoff then
+                local d = #(shop.vehicleDropoff - job.pickupCoords)
+                if not best or d < best then
+                    best = d
+                    shopId = id
+                end
+            end
+        end
+    end
+    if shopId and Config.ShopJobMapping[shopId] then
+        local shop = Config.ShopJobMapping[shopId]
+        job.destination = { type = TowJob.DestinationType.SHOP, id = shopId, coords = shop.vehicleDropoff }
+        job.destinationLabel = shop.label or shopId
+        return job.destination
+    end
+    return nil
+end
 
 -- Vehicle attached
 -- H2: this is the ONLY transition into TOWING, and completeJob requires TOWING.
@@ -223,36 +256,9 @@ RegisterNetEvent('dps-towjob:server:vehicleAttached', function(jobId, vehicleDat
     job.vehicleModel = vehicleData.model
     job.pickupLocation = vehicleData.location
 
-    -- Determine destination
-    if job.type == TowJob.JobTypes.POLICE then
-        -- Police tows go to nearest impound
-        local nearestImpound = GetNearestImpound(job.pickupCoords)
-        job.destination = {
-            type = TowJob.DestinationType.IMPOUND,
-            id = nearestImpound,
-            coords = Config.ImpoundLots[nearestImpound].dropoff
-        }
-    else
-        -- Repair tows go to shop with longest wait and on-duty mechanics
-        local shopId = GetNextRepairShop()
-        if shopId then
-            job.destination = {
-                type = TowJob.DestinationType.SHOP,
-                id = shopId,
-                coords = Config.ShopJobMapping[shopId].vehicleDropoff
-            }
-        else
-            -- Fallback to driver's shop
-            local driverShop = GetDriverShop(source)
-            if driverShop then
-                job.destination = {
-                    type = TowJob.DestinationType.SHOP,
-                    id = driverShop,
-                    coords = Config.ShopJobMapping[driverShop].vehicleDropoff
-                }
-            end
-        end
-    end
+    ChooseDestination(job, source)
+    job.etaAt = nil
+    ChargeRequestFee(job)
 
     MySQL.update.await([[
         UPDATE tow_jobs SET state = ?, vehicle_plate = ?, vehicle_model = ?, dropoff_coords = ? WHERE id = ?
@@ -265,6 +271,7 @@ RegisterNetEvent('dps-towjob:server:vehicleAttached', function(jobId, vehicleDat
     })
 
     TriggerClientEvent('dps-towjob:client:jobStateChanged', source, job)
+    PublishRequest(job)
     TowJob.Debug('Vehicle attached:', job.id, 'destination:', job.destination and job.destination.id)
 end)
 
@@ -299,6 +306,11 @@ RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
     end
 
     job.state = TowJob.JobState.COMPLETED
+    if job.kind and job.feeCharged and (job.fee or 0) > 0 then
+        local driverShop = GetDriverShop(source)
+        if driverShop then AddToShopFund(driverShop, job.fee, 'Tow fee ' .. job.id) end
+    end
+    PublishRequest(job)
     job.completedAt = os.time()
 
     -- Calculate payment SERVER-SIDE from server-tracked pickup/destination.
