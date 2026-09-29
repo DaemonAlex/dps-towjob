@@ -6,6 +6,7 @@
 
 OpenRequests = {}            -- citizenid -> job (one open request per player)
 local LastRequestAt = {}     -- citizenid -> os.time() of the last request
+local RefundOwed = {}        -- citizenid -> true while a fee is waiting to be paid back
 
 local function sourceFor(citizenid)
     local player = Bridge.GetPlayerByIdentifier(citizenid)
@@ -56,6 +57,50 @@ function ChargeRequestFee(job)
         MySQL.update('UPDATE tow_jobs SET fee_paid = 1 WHERE id = ?', { job.id })
     else
         job.feeDue = true
+    end
+end
+
+--- Give the fee back when the tow did not happen. fee_paid: 0 not paid,
+--- 1 paid, 2 refund owed. A requester who is offline is paid the next time
+--- they open the app.
+function RefundRequestFee(job)
+    if not job then return 'none' end
+    local src = sourceFor(job.requesterId)
+    local decision = TowLifecycle.refundDecision(job, src ~= nil)
+    if decision == 'none' then return decision end
+
+    local fee = job.fee or 0
+    job.feeCharged = nil
+    if decision == 'refund' then
+        Bridge.AddMoney(src, 'bank', fee)
+        job.refund = 'refunded'
+        MySQL.update('UPDATE tow_jobs SET fee_paid = 0 WHERE id = ?', { job.id })
+    else
+        job.refund = 'owed'
+        RefundOwed[job.requesterId] = true
+        MySQL.update('UPDATE tow_jobs SET fee_paid = 2 WHERE id = ?', { job.id })
+    end
+    return decision
+end
+
+--- Pay back anything this player is owed. Only ever reaches the database for
+--- a citizen the server already knows is owed something.
+local function payOwedRefunds(source, citizenid)
+    if not RefundOwed[citizenid] then return end
+    RefundOwed[citizenid] = nil
+    local rows = MySQL.query.await('SELECT id, fee FROM tow_jobs WHERE requester_id = ? AND fee_paid = 2', { citizenid })
+    if type(rows) ~= 'table' then return end
+    local total = 0
+    for i = 1, #rows do
+        local fee = tonumber(rows[i].fee) or 0
+        if fee > 0 then
+            total = total + fee
+            MySQL.update('UPDATE tow_jobs SET fee_paid = 0 WHERE id = ?', { rows[i].id })
+        end
+    end
+    if total > 0 then
+        Bridge.AddMoney(source, 'bank', total)
+        Bridge.Notify(source, 'City Services', ('Your $%d tow fee was paid back.'):format(total), 'success')
     end
 end
 
@@ -146,6 +191,7 @@ end
 local function getRequestStatus(source)
     local player = Bridge.GetPlayer(source)
     if not player then return nil end
+    payOwedRefunds(source, player.PlayerData.citizenid)
     local job = OpenRequests[player.PlayerData.citizenid]
     if not job then return nil end
     job.requesterSource = source
@@ -186,8 +232,9 @@ exports('GetRequestConfig', function()
 end)
 
 -- The queue lives in memory. After a restart nothing is open any more, so
--- close the rows a previous run left behind. Nobody was charged for them:
--- the fee is only taken at hook time.
+-- close the rows a previous run left behind. A row that was already on the
+-- truck had its fee taken, so it is marked as a refund owed first, and the
+-- requester is paid when they next open the app.
 MySQL.ready(function()
     -- server/main.lua creates tow_jobs without waiting for the result, so make
     -- sure the table is there before touching it.
@@ -204,9 +251,43 @@ MySQL.ready(function()
     MySQL.query.await('ALTER TABLE tow_jobs ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NULL')
     MySQL.query.await('ALTER TABLE tow_jobs ADD COLUMN IF NOT EXISTS fee INT NOT NULL DEFAULT 0')
     MySQL.query.await('ALTER TABLE tow_jobs ADD COLUMN IF NOT EXISTS fee_paid TINYINT(1) NOT NULL DEFAULT 0')
+
+    -- A vehicle that was on the truck had its fee taken and will never be
+    -- delivered, so the fee is owed back before the row is closed.
+    local owed = MySQL.update.await([[
+        UPDATE tow_jobs SET fee_paid = 2 WHERE state = 'towing' AND fee_paid = 1
+    ]])
+    TowJob.Debug('Tow fees owed back after the previous run:', owed)
+
+    -- Everyone with a request that is about to be closed hears about it once.
+    local open = MySQL.query.await([[
+        SELECT requester_id FROM tow_jobs
+        WHERE kind IS NOT NULL AND requester_id IS NOT NULL
+          AND state IN ('queued', 'assigned', 'en_route', 'on_scene', 'towing')
+    ]])
     local closed = MySQL.update.await([[
         UPDATE tow_jobs SET state = 'cancelled'
         WHERE state IN ('queued', 'assigned', 'en_route', 'on_scene', 'towing')
     ]])
     TowJob.Debug('Closed stale tow jobs from the previous run:', closed)
+
+    local refundRows = MySQL.query.await('SELECT DISTINCT requester_id FROM tow_jobs WHERE fee_paid = 2 AND requester_id IS NOT NULL')
+    if type(refundRows) == 'table' then
+        for i = 1, #refundRows do RefundOwed[refundRows[i].requester_id] = true end
+    end
+
+    if type(open) == 'table' then
+        local told = {}
+        for i = 1, #open do
+            local citizenid = open[i].requester_id
+            if citizenid and not told[citizenid] then
+                told[citizenid] = true
+                local src = sourceFor(citizenid)
+                if src then
+                    Bridge.Notify(src, 'City Services',
+                        'Tow dispatch restarted. Your open tow request was closed. You can ask again.', 'inform')
+                end
+            end
+        end
+    end
 end)

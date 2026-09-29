@@ -57,8 +57,17 @@ local function finish(job, state, reason)
     job.cancelReason = reason
     job.etaAt = nil
     CityTowJobs[job.id] = nil
+    -- A tow that never happened gives the fee back before anyone is told.
+    if state == TowJob.JobState.CANCELLED and RefundRequestFee then RefundRequestFee(job) end
     MySQL.update('UPDATE tow_jobs SET state = ?, completed_at = NOW() WHERE id = ?', { state, job.id })
     PublishRequest(job)
+end
+
+--- Stop a tow City Tow is already doing. Used when the requester cancels.
+function CancelCityTow(job, reason)
+    if not job or not CityTowJobs[job.id] then return false end
+    finish(job, TowJob.JobState.CANCELLED, reason or 'requester')
+    return true
 end
 
 local function cityDeliver(jobId)

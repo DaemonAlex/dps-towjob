@@ -46,6 +46,16 @@ function TowLifecycle.sanitizeLabel(text, maxLen)
     return clean
 end
 
+--- One spelling of a plate for every comparison: no spaces, upper case.
+--- The game pads a plate shorter than eight characters, so the raw text a
+--- client reports and the text the server recorded need not match byte for byte.
+function TowLifecycle.cleanPlate(plate)
+    if type(plate) ~= 'string' then return nil end
+    local clean = plate:gsub('%s+', ''):upper()
+    if clean == '' then return nil end
+    return clean
+end
+
 function TowLifecycle.findInQueue(queue, jobId)
     if type(queue) ~= 'table' then return nil end
     for i = 1, #queue do
@@ -156,6 +166,19 @@ function TowLifecycle.feeFor(kind, cfg)
     return cfg.repairTowFee
 end
 
+--- What happens to the tow fee when a request ends without the tow happening.
+--- 'none'    nothing was taken, so nothing goes back
+--- 'refund'  the fee was taken and the requester is here: pay it back now
+--- 'owed'    the fee was taken and the requester is away: pay it back later
+function TowLifecycle.refundDecision(job, requesterOnline)
+    if type(job) ~= 'table' then return 'none' end
+    if not job.kind or job.test then return 'none' end
+    if job.feeCharged ~= true then return 'none' end
+    if (job.fee or 0) <= 0 then return 'none' end
+    if requesterOnline == true then return 'refund' end
+    return 'owed'
+end
+
 --- What City Tow does with the vehicle at hook time.
 --- 'delete'   the right vehicle is at the pickup, empty: remove it from the world
 --- 'missing'  no matching vehicle exists: cancel the request
@@ -183,6 +206,8 @@ function TowLifecycle.publicView(job, queue, now)
         destination = job.destinationLabel,
         fee = job.fee or 0,
         feeDue = job.feeDue == true,
+        feeCharged = job.feeCharged == true,
+        refund = job.refund,
         cityTow = job.cityTow == true,
         driverName = job.driverName,
         reason = job.cancelReason,
