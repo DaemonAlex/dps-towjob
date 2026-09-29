@@ -465,6 +465,31 @@ lib.callback.register('dps-towjob:server:canClockIn', function(source, shopId)
     return true
 end)
 
+--- Write an impound record. towedBy is a citizenid, or 'CITYTOW'.
+function RecordImpound(plate, impoundId, towedBy, jobId)
+    local impound = Config.ImpoundLots[impoundId]
+    if not impound or not plate then return false end
+
+    MySQL.insert.await([[
+        INSERT INTO tow_impound_vehicles (plate, impound_lot, towed_by, tow_job_id, fee_base, fee_per_day)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            impound_lot = VALUES(impound_lot),
+            towed_by = VALUES(towed_by),
+            tow_job_id = VALUES(tow_job_id),
+            impounded_at = CURRENT_TIMESTAMP,
+            released_at = NULL,
+            released_by = NULL
+    ]], { plate, impoundId, towedBy, jobId, impound.fee.base, impound.fee.perDay })
+
+    MySQL.update.await([[
+        UPDATE player_vehicles SET state = 2 WHERE plate = ?
+    ]], { plate })
+
+    TowJob.Debug('Vehicle impounded:', plate, 'at', impoundId)
+    return true
+end
+
 -- Track impound vehicle location
 RegisterNetEvent('dps-towjob:server:impoundVehicle', function(plate, impoundId)
     local source = source
@@ -502,34 +527,7 @@ RegisterNetEvent('dps-towjob:server:impoundVehicle', function(plate, impoundId)
         return
     end
 
-    local citizenid = Player.PlayerData.citizenid
-
-    -- Store in impound tracking
-    MySQL.insert.await([[
-        INSERT INTO tow_impound_vehicles (plate, impound_lot, towed_by, tow_job_id, fee_base, fee_per_day)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-            impound_lot = VALUES(impound_lot),
-            towed_by = VALUES(towed_by),
-            tow_job_id = VALUES(tow_job_id),
-            impounded_at = CURRENT_TIMESTAMP,
-            released_at = NULL,
-            released_by = NULL
-    ]], {
-        plate,
-        impoundId,
-        citizenid,
-        job and job.id or nil,
-        impound.fee.base,
-        impound.fee.perDay
-    })
-
-    -- Update player_vehicles state
-    MySQL.update.await([[
-        UPDATE player_vehicles SET state = 2 WHERE plate = ?
-    ]], { plate })
-
-    TowJob.Debug('Vehicle impounded:', plate, 'at', impoundId)
+    RecordImpound(plate, impoundId, Player.PlayerData.citizenid, job.id)
 end)
 
 -- Get vehicle impound location

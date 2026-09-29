@@ -141,12 +141,9 @@ RegisterNetEvent('dps-towjob:server:notifyMechanics', function(shopId, data)
     end
 end)
 
--- Create service ticket when vehicle delivered to shop
-RegisterNetEvent('dps-towjob:server:createServiceTicket', function(shopId, vehicleData, customerData)
-    local source = source
-    local Player = Bridge.GetPlayer(source)
-
-    if not Player then return end
+--- Create a repair ticket at a shop. towedBy is a citizenid, or 'CITYTOW'.
+function CreateServiceTicket(shopId, vehicleData, customerData, towedBy)
+    if not Config.ShopJobMapping[shopId] or type(vehicleData) ~= 'table' then return nil end
 
     local ticketId = TowJob.GenerateId()
 
@@ -157,17 +154,25 @@ RegisterNetEvent('dps-towjob:server:createServiceTicket', function(shopId, vehic
         ticketId,
         shopId,
         json.encode(vehicleData),
-        json.encode(customerData),
-        Player.PlayerData.citizenid
+        json.encode(customerData or {}),
+        towedBy,
     })
 
-    -- Notify mechanics
     TriggerEvent('dps-towjob:server:notifyMechanics', shopId, {
         vehicleModel = vehicleData.model,
-        plate = vehicleData.plate
+        plate = vehicleData.plate,
     })
 
     TowJob.Debug('Service ticket created:', ticketId)
-
     return ticketId
+end
+
+-- Create service ticket when a driver delivers a vehicle to a shop
+RegisterNetEvent('dps-towjob:server:createServiceTicket', function(shopId, vehicleData, customerData)
+    local source = source
+    local Player = Bridge.GetPlayer(source)
+    if not Player then return end
+    local job = ActiveJobs[source]
+    if not job or not job.destination or job.destination.id ~= shopId then return end
+    CreateServiceTicket(shopId, vehicleData, customerData, Player.PlayerData.citizenid)
 end)
