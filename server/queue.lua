@@ -79,34 +79,24 @@ exports('RequestTow', function(source, coords, towType, priority)
     })
 end)
 
--- Check queue for available assignments
+-- Offer queued jobs to available drivers, oldest-idle driver first.
 AddEventHandler('dps-towjob:server:checkQueue', function()
     if #TowQueue == 0 then return end
 
-    local availableDrivers = GetAvailableDrivers()
-    if #availableDrivers == 0 then return end
+    local available = GetAvailableDrivers()
+    if #available == 0 then return end
 
-    for _, driver in ipairs(availableDrivers) do
-        if #TowQueue == 0 then break end
-
-        local job = TowQueue[1]
-
-        -- Check if driver on PVE should get PVP job
-        if job.type ~= TowJob.JobTypes.PVE and DutyTracker[driver.source] then
-            local currentJob = ActiveJobs[driver.source]
-            if currentJob and currentJob.type == TowJob.JobTypes.PVE then
-                -- Skip this driver, they're on PVE and there are other drivers
-                if #availableDrivers > 1 then
-                    goto continue
+    for i = 1, #TowQueue do
+        local job = TowQueue[i]
+        if job and not job.offeredTo and not job.cityTow then
+            local driver = TowLifecycle.nextDriver(available, job)
+            if driver and OfferJob(driver.source, job) then
+                for k = #available, 1, -1 do
+                    if available[k].source == driver.source then table.remove(available, k) end
                 end
+                if #available == 0 then break end
             end
         end
-
-        -- Assign job
-        table.remove(TowQueue, 1)
-        AssignJobToDriver(driver.source, job)
-
-        ::continue::
     end
 end)
 

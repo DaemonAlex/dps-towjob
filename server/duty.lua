@@ -38,6 +38,7 @@ RegisterNetEvent('dps-towjob:server:toggleDuty', function(shopId)
             return
         end
 
+        if PendingOffers[source] then WithdrawOffer(source, 'offduty') end
         DutyTracker[source] = nil
         Bridge.SetDuty(source, false)
 

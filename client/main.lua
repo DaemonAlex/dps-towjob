@@ -81,8 +81,10 @@ RegisterNetEvent('dps-towjob:client:jobAssigned', function(job)
     -- Show job blip
     CreateJobBlip(job)
 
-    -- Open job UI
-    OpenJobUI(job)
+    -- A job that arrived through an accepted offer needs no second accept menu
+    if not job.accepted then
+        OpenJobUI(job)
+    end
 end)
 
 -- Job state changed
