@@ -168,8 +168,19 @@ end)
 -- The queue lives in memory. After a restart nothing is open any more, so
 -- close the rows a previous run left behind. Nobody was charged for them:
 -- the fee is only taken at hook time.
-CreateThread(function()
-    Wait(5000)
+MySQL.ready(function()
+    -- server/main.lua creates tow_jobs without waiting for the result, so make
+    -- sure the table is there before touching it.
+    local tries = 0
+    while tries < 30 and not MySQL.scalar.await("SHOW TABLES LIKE 'tow_jobs'") do
+        tries = tries + 1
+        Wait(1000)
+    end
+    if tries >= 30 then
+        print('[dps-towjob] tow_jobs table not found after 30 s; request columns and the stale sweep were skipped')
+        return
+    end
+
     MySQL.query.await('ALTER TABLE tow_jobs ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NULL')
     MySQL.query.await('ALTER TABLE tow_jobs ADD COLUMN IF NOT EXISTS fee INT NOT NULL DEFAULT 0')
     MySQL.query.await('ALTER TABLE tow_jobs ADD COLUMN IF NOT EXISTS fee_paid TINYINT(1) NOT NULL DEFAULT 0')
