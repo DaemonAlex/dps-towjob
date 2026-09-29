@@ -25,7 +25,11 @@ function AddToQueue(request)
         state = TowJob.JobState.QUEUED,
         assignedTo = nil,
         createdAt = os.time(),
-        zone = TowJob.GetZoneName(request.coords),
+        zone = request.locationLabel or TowJob.GetZoneName(request.coords) or 'Unknown',
+        kind = request.kind,
+        fee = request.fee or 0,
+        netId = request.netId,
+        declined = {},
         -- Preserve PVE / predatory metadata so the server stays authoritative
         -- over commission (settlement math), dispatch display, and cleanup.
         pveId = request.pveId,
@@ -34,19 +38,7 @@ function AddToQueue(request)
         commission = request.commission,
     }
 
-    -- Insert based on priority
-    local inserted = false
-    for i, queuedJob in ipairs(TowQueue) do
-        if job.priority > queuedJob.priority then
-            table.insert(TowQueue, i, job)
-            inserted = true
-            break
-        end
-    end
-
-    if not inserted then
-        table.insert(TowQueue, job)
-    end
+    TowLifecycle.insertByPriority(TowQueue, job)
 
     TowJob.Debug('Job added to queue:', job.id, job.type)
 
@@ -415,18 +407,15 @@ RegisterNetEvent('dps-towjob:server:cancelJob', function(jobId, reason)
     job.cancelledBy = source
     job.cancelReason = reason
 
-    -- Insert back based on original timestamp
-    local inserted = false
-    for i, queuedJob in ipairs(TowQueue) do
-        if job.createdAt < queuedJob.createdAt then
-            table.insert(TowQueue, i, job)
-            inserted = true
-            break
-        end
+    -- Back into the queue by priority and age, and never back to the same driver
+    job.etaAt = nil
+    job.driverName = nil
+    job.accepted = nil
+    if DutyTracker[source] and DutyTracker[source].citizenid then
+        job.declined[DutyTracker[source].citizenid] = true
     end
-    if not inserted then
-        table.insert(TowQueue, job)
-    end
+    TowLifecycle.insertByPriority(TowQueue, job)
+    if PublishRequest then PublishRequest(job) end
 
     -- Clear active job
     ActiveJobs[source] = nil

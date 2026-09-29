@@ -111,6 +111,7 @@ function GetAvailableDrivers()
         if duty.state == TowJob.DriverState.AVAILABLE then
             available[#available + 1] = {
                 source = src,
+                citizenid = duty.citizenid,
                 shop = duty.shop,
                 clockedInAt = duty.clockedInAt,
                 lastTowCompleted = duty.lastTowCompleted,
@@ -215,6 +216,10 @@ end)
 -- receiving dispatch offers.
 local function cleanupPlayer(source)
 
+    if PendingOffers and PendingOffers[source] and WithdrawOffer then
+        WithdrawOffer(source, 'disconnect')
+    end
+
     -- Clean up cooldowns
     EventCooldowns[source] = nil
 
@@ -248,7 +253,13 @@ local function cleanupPlayer(source)
         -- Requeue the job
         job.state = TowJob.JobState.QUEUED
         job.assignedTo = nil
-        table.insert(TowQueue, 1, job)
+        job.etaAt = nil
+        job.driverName = nil
+        job.accepted = nil
+        job.declined = job.declined or {}
+        if citizenid then job.declined[citizenid] = true end
+        TowLifecycle.insertByPriority(TowQueue, job)
+        if PublishRequest then PublishRequest(job) end
         ActiveJobs[source] = nil
         TowJob.Debug('Requeued job from disconnected driver:', job.id)
     end
