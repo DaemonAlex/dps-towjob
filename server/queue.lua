@@ -102,6 +102,36 @@ AddEventHandler('dps-towjob:server:checkQueue', function()
     end
 end)
 
+--- What a driver's client is given about a job: what their screen shows and
+--- nothing else. No requester citizen id, no list of drivers who declined.
+function DriverJobView(job)
+    if type(job) ~= 'table' then return nil end
+    return {
+        id = job.id,
+        type = job.type,
+        kind = job.kind,
+        state = job.state,
+        priority = job.priority,
+        zone = job.zone,
+        pickupCoords = job.pickupCoords,
+        vehiclePlate = job.vehiclePlate,
+        vehicleModel = job.vehicleModel,
+        vehicleCode = job.vehicleCode,
+        violation = job.violation,
+        violationText = job.violationText,
+        commission = job.commission,
+        pveId = job.pveId,
+        destination = job.destination,
+        destinationLabel = job.destinationLabel,
+        accepted = job.accepted,
+        payment = job.payment,
+        createdAt = job.createdAt,
+        -- a server id, not an identity: roadside billing needs it to bill the
+        -- caller standing in front of the driver
+        requesterSource = job.requesterSource,
+    }
+end
+
 -- Assign job to driver
 function AssignJobToDriver(source, job)
     job.state = TowJob.JobState.ASSIGNED
@@ -122,7 +152,7 @@ function AssignJobToDriver(source, job)
     })
 
     -- Notify driver
-    TriggerClientEvent('dps-towjob:client:jobAssigned', source, job)
+    TriggerClientEvent('dps-towjob:client:jobAssigned', source, DriverJobView(job))
 
     local charinfo = assignPlayer and assignPlayer.PlayerData and assignPlayer.PlayerData.charinfo
     job.driverName = charinfo and (charinfo.firstname .. ' ' .. charinfo.lastname) or 'A driver'
@@ -152,7 +182,7 @@ RegisterNetEvent('dps-towjob:server:acceptJob', function(jobId)
         UPDATE tow_jobs SET state = ? WHERE id = ?
     ]], { job.state, job.id })
 
-    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, job)
+    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, DriverJobView(job))
     PublishRequest(job)
     TowJob.Debug('Job accepted:', job.id)
 end)
@@ -173,7 +203,7 @@ RegisterNetEvent('dps-towjob:server:arrivedOnScene', function(jobId)
         UPDATE tow_jobs SET state = ? WHERE id = ?
     ]], { job.state, job.id })
 
-    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, job)
+    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, DriverJobView(job))
     PublishRequest(job)
     TowJob.Debug('Driver on scene:', job.id)
 end)
@@ -288,7 +318,7 @@ RegisterNetEvent('dps-towjob:server:vehicleAttached', function(jobId, vehicleDat
         job.id
     })
 
-    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, job)
+    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, DriverJobView(job))
     PublishRequest(job)
     TowJob.Debug('Vehicle attached:', job.id, 'destination:', job.destination and job.destination.id)
 end)
@@ -396,7 +426,7 @@ RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
     end
 
     -- Notify driver
-    TriggerClientEvent('dps-towjob:client:jobCompleted', source, job)
+    TriggerClientEvent('dps-towjob:client:jobCompleted', source, DriverJobView(job))
 
     TowJob.Debug('Job completed:', job.id, 'payment:', totalPayment)
 
@@ -465,7 +495,7 @@ RegisterNetEvent('dps-towjob:server:cancelJob', function(jobId, reason)
         type = 'inform'
     })
 
-    TriggerClientEvent('dps-towjob:client:jobCancelled', source, job)
+    TriggerClientEvent('dps-towjob:client:jobCancelled', source, DriverJobView(job))
 
     TowJob.Debug('Job cancelled:', job.id, 'reason:', reason)
 

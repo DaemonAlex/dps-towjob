@@ -70,6 +70,19 @@ local function ValidateTowDriver(source)
     return true, Player
 end
 
+--- Does this player work in a repair shop or on a tow truck, and are they on
+--- duty? The shop-floor events (a vehicle arriving, a repair starting or
+--- finishing) are only ever sent by these two, so a stranger cannot fire them.
+--- GLOBAL: server/dispatch.lua and bridge/jg-mechanic.lua both use it.
+function IsShopStaff(source)
+    local Player = Bridge.GetPlayer(source)
+    if not Player then return false end
+    local job = Player.PlayerData.job
+    if not job or job.onduty ~= true then return false end
+    return job.name == 'mechanic' or job.name == Config.JobName
+end
+exports('IsShopStaff', IsShopStaff)
+
 -- Server-side validation: Verify player distance from coords
 -- GLOBAL so server/queue.lua, server/pve.lua etc. can enforce arrival checks.
 function ValidateDistance(source, targetCoords, maxDistance)
@@ -430,10 +443,16 @@ lib.callback.register('dps-towjob:server:getQueueInfo', function(source)
     local valid, _ = ValidateTowDriver(source)
     if not valid then return nil end
 
+    -- Sanitised: the raw jobs carry the requester's citizen id and the ids of
+    -- every driver who declined.
+    local queue, active = {}, {}
+    for i = 1, #TowQueue do queue[i] = DriverJobView(TowQueue[i]) end
+    for src, job in pairs(ActiveJobs) do active[src] = DriverJobView(job) end
+
     return {
-        queue = TowQueue,
+        queue = queue,
         length = #TowQueue,
-        activeJobs = ActiveJobs,
+        activeJobs = active,
         drivers = GetAvailableDrivers()
     }
 end)

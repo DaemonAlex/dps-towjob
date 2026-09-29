@@ -2,9 +2,11 @@
     dps-towjob Bridge: jg-mechanic
     Integration with JG Scripts mechanic system
 
-    jg-mechanic is NOT installed on this box. Every jg-mechanic:server:* handler
-    below is soft-gated via JGActive() so the integration code (including the
-    LIKE-based service-ticket queries, M3) NEVER runs when jg-mechanic is absent.
+    jg-mechanic IS installed on this box. Every jg-mechanic:server:* handler
+    below is still gated via JGActive() so nothing runs if it is ever removed,
+    and every shop-floor net event requires the sender to hold the mechanic or
+    the tow job and be on duty. Service tickets are matched on the plate inside
+    the stored JSON, never with a LIKE over the whole row.
     The generic mechanic-count helpers only read job.onduty and are framework-safe.
 ]]
 
@@ -101,9 +103,14 @@ exports('NotifyShopMechanics', NotifyShopMechanics)
 
 -- Vehicle dropoff notification
 RegisterNetEvent('dps-towjob:server:vehicleDroppedAtShop', function(shopId, vehicleData)
+    if not IsShopStaff(source) then return end
+    if type(vehicleData) ~= 'table' then return end
+
     NotifyShopMechanics(shopId,
         'Vehicle Dropped Off',
-        string.format('%s [%s] ready for service', vehicleData.model, vehicleData.plate),
+        string.format('%s [%s] ready for service',
+            TowLifecycle.sanitizeLabel(vehicleData.model, 30),
+            TowLifecycle.sanitizeLabel(vehicleData.plate, 10)),
         'inform'
     )
 
@@ -136,29 +143,40 @@ exports('GetActiveRepairShops', GetActiveRepairShops)
 -- This allows tow system to track service completion
 RegisterNetEvent('jg-mechanic:server:repairStarted', function(vehiclePlate)
     if not JGActive() then return end
-    -- Update service ticket status if exists
-    MySQL.update.await([[
-        UPDATE tow_service_tickets SET status = 'in_progress' WHERE vehicle_data LIKE ? AND status = 'awaiting_repair'
-    ]], { '%' .. vehiclePlate .. '%' })
+    if not IsShopStaff(source) then return end
+    local plate = TowLifecycle.cleanPlate(vehiclePlate)
+    if not plate then return end
 
-    TowJob.Debug('Repair started for:', vehiclePlate)
+    -- Matched on the plate stored inside the ticket's JSON, not with a LIKE
+    -- over the whole row: a LIKE let one client's text match any ticket.
+    MySQL.update.await([[
+        UPDATE tow_service_tickets SET status = 'in_progress'
+        WHERE REPLACE(UPPER(JSON_UNQUOTE(JSON_EXTRACT(vehicle_data, '$.plate'))), ' ', '') = ?
+          AND status = 'awaiting_repair'
+    ]], { plate })
+
+    TowJob.Debug('Repair started for:', plate)
 end)
 
 RegisterNetEvent('jg-mechanic:server:repairCompleted', function(vehiclePlate, repairCost)
     if not JGActive() then return end
     local source = source
+    if not IsShopStaff(source) then return end
+    local plate = TowLifecycle.cleanPlate(vehiclePlate)
+    if not plate then return end
     local citizenid = Bridge.GetIdentifier(source)
+    local cost = math.max(0, math.floor(tonumber(repairCost) or 0))
 
     if citizenid then
-        -- Update service ticket
         MySQL.update.await([[
             UPDATE tow_service_tickets
             SET status = 'completed', completed_at = NOW(), repaired_by = ?, repair_cost = ?
-            WHERE vehicle_data LIKE ? AND status = 'in_progress'
-        ]], { citizenid, repairCost or 0, '%' .. vehiclePlate .. '%' })
+            WHERE REPLACE(UPPER(JSON_UNQUOTE(JSON_EXTRACT(vehicle_data, '$.plate'))), ' ', '') = ?
+              AND status = 'in_progress'
+        ]], { citizenid, cost, plate })
     end
 
-    TowJob.Debug('Repair completed for:', vehiclePlate)
+    TowJob.Debug('Repair completed for:', plate)
 end)
 
 -- Callback to get shop info for UI

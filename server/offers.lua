@@ -140,7 +140,7 @@ local function acceptOffer(source, jobId)
     job.state = TowJob.JobState.EN_ROUTE
     MySQL.update('UPDATE tow_jobs SET state = ? WHERE id = ?', { job.state, job.id })
 
-    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, job)
+    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, DriverJobView(job))
     PublishRequest(job)
     PublishQueuePositions()
     driverChanged(source)
