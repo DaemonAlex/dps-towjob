@@ -93,15 +93,28 @@ local function payOwedRefunds(source, citizenid)
     for i = 1, #rows do
         local fee = tonumber(rows[i].fee) or 0
         if fee > 0 then
-            total = total + fee
-            MySQL.update('UPDATE tow_jobs SET fee_paid = 0 WHERE id = ?', { rows[i].id })
+            -- Claim the row first, and pay only if this call is the one that
+            -- changed it. Without the `AND fee_paid = 2` a restart between the
+            -- write and the payment let the same fee be paid back twice.
+            local claimed = MySQL.update.await(
+                'UPDATE tow_jobs SET fee_paid = 0 WHERE id = ? AND fee_paid = 2', { rows[i].id })
+            if (tonumber(claimed) or 0) > 0 then
+                Bridge.AddMoney(source, 'bank', fee)
+                total = total + fee
+            end
         end
     end
     if total > 0 then
-        Bridge.AddMoney(source, 'bank', total)
         Bridge.Notify(source, 'City Services', ('Your $%d tow fee was paid back.'):format(total), 'success')
     end
 end
+
+--- The two marks that hold a place while a request is being built. Everything
+--- below the plate check waits for the database, and until AddToQueue returns
+--- the job is in no table anyone can see, so without these two a double tap or
+--- two players racing on one vehicle both get through.
+local Requesting = {}   -- citizenid -> true while that player's request is being built
+local PlateBusy = {}    -- cleaned plate -> true while a request is being built for it
 
 --- Is a tow already on the way for this vehicle? Two requests for one plate
 --- end with one job deleting the car out from under the other.
@@ -118,7 +131,7 @@ local function plateHasOpenJob(plate)
     return false
 end
 
-local function makeRequest(source, player, data)
+local function makeRequest(source, player, data, claim)
     local kind = data.kind
     if not TowLifecycle.validKind(kind) then return false, 'bad_kind' end
 
@@ -149,7 +162,11 @@ local function makeRequest(source, player, data)
         return false, 'too_far'
     end
 
-    if plateHasOpenJob(plate) then return false, 'already_requested' end
+    if plateHasOpenJob(plate) or PlateBusy[plate] then return false, 'already_requested' end
+    -- Claimed before the first database wait, so a second player asking for the
+    -- same vehicle in the same instant is refused rather than queued.
+    PlateBusy[plate] = true
+    claim.plate = plate
 
     if kind ~= 'impound' then
         local owns = MySQL.scalar.await(
@@ -208,11 +225,11 @@ local function makeRequest(source, player, data)
     return true, TowLifecycle.publicView(job, TowQueue, os.time())
 end
 
---- The checks inside makeRequest wait for the database, so two requests sent
---- in the same instant both used to get through. The citizen is marked while
---- one is being built, and the mark is cleared on every way out, errors too.
-local Requesting = {}
-
+--- The checks inside makeRequest wait for the database, so two requests sent in
+--- the same instant both used to get through: the same player twice, or two
+--- players on one vehicle. The citizen and the plate are both marked while a
+--- request is being built, and both marks are cleared here on every way out,
+--- errors included.
 local function requestService(source, data)
     local player = Bridge.GetPlayer(source)
     if not player then return false, 'no_player' end
@@ -222,8 +239,10 @@ local function requestService(source, data)
     if Requesting[citizenid] then return false, 'open_request' end
     Requesting[citizenid] = true
 
-    local ok, a, b = pcall(makeRequest, source, player, data)
+    local claim = {}
+    local ok, a, b = pcall(makeRequest, source, player, data, claim)
     Requesting[citizenid] = nil
+    if claim.plate then PlateBusy[claim.plate] = nil end
 
     if not ok then
         print('[dps-towjob] request failed: ' .. tostring(a))
@@ -243,8 +262,9 @@ local function getRequestStatus(source)
 end
 
 --- A requester may call a tow off while it is still in line or while the driver
---- is on the way. Once the driver has arrived it is too late: no fee has been
---- taken before the hook, so a cancel here never owes anything back.
+--- is on the way. Once the driver has arrived it is too late. A job that was
+--- hooked and then put back in line still carries its fee, so the fee is given
+--- back here too; it is a no-op when nothing was charged.
 local function cancelRequest(source)
     local player = Bridge.GetPlayer(source)
     if not player then return false, 'no_player' end
@@ -266,6 +286,9 @@ local function cancelRequest(source)
     TowLifecycle.removeFromQueue(TowQueue, job.id)
     job.state = TowJob.JobState.CANCELLED
     job.cancelReason = 'requester'
+    -- A driver may have hooked it and then put it back in line, in which case
+    -- the $200 has already left the bank.
+    RefundRequestFee(job)
     if offeredTo and WithdrawOffer then WithdrawOffer(offeredTo, 'cancelled', job) end
 
     -- Free the driver who accepted it, so they are not stuck on a job nobody
