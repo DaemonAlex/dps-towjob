@@ -217,7 +217,14 @@ local function jobExists(name)
     if type(name) ~= 'string' or name == '' then return false end
     if RealJob[name] ~= nil then return RealJob[name] end
     local ok, job = pcall(function() return exports.qbx_core:GetJob(name) end)
-    RealJob[name] = ok and job ~= nil
+    -- Only a real answer is remembered. A lookup that threw (the framework is
+    -- not up yet) must not leave every shop marked "not a job" for the rest of
+    -- the run, which would leave ChooseDestination with nowhere to send a car.
+    if not ok then
+        TowJob.Debug('GetJob failed for', name, '- answer not cached')
+        return false
+    end
+    RealJob[name] = job ~= nil
     return RealJob[name]
 end
 
