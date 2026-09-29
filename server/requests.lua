@@ -104,11 +104,22 @@ local function payOwedRefunds(source, citizenid)
     end
 end
 
-local function requestService(source, data)
-    local player = Bridge.GetPlayer(source)
-    if not player then return false, 'no_player' end
-    if type(data) ~= 'table' then return false, 'bad_request' end
+--- Is a tow already on the way for this vehicle? Two requests for one plate
+--- end with one job deleting the car out from under the other.
+local function plateHasOpenJob(plate)
+    for i = 1, #TowQueue do
+        if TowLifecycle.cleanPlate(TowQueue[i].vehiclePlate) == plate then return true end
+    end
+    for _, job in pairs(ActiveJobs) do
+        if TowLifecycle.cleanPlate(job.vehiclePlate) == plate then return true end
+    end
+    for _, job in pairs(OpenRequests) do
+        if TowLifecycle.cleanPlate(job.vehiclePlate) == plate then return true end
+    end
+    return false
+end
 
+local function makeRequest(source, player, data)
     local kind = data.kind
     if not TowLifecycle.validKind(kind) then return false, 'bad_kind' end
 
@@ -123,35 +134,38 @@ local function requestService(source, data)
         return false, 'not_allowed'
     end
 
-    local c = data.coords
-    if c == nil then return false, 'bad_coords' end
-    local x, y, z = tonumber(c.x), tonumber(c.y), tonumber(c.z)
-    if not x or not y or not z then return false, 'bad_coords' end
-    local coords = vector3(x + 0.0, y + 0.0, z + 0.0)
+    -- Everything about the vehicle is read from the entity the net id resolves
+    -- to. The client's plate, model and coordinates are not used.
+    local netId = tonumber(data.netId)
+    local entity = netId and NetworkGetEntityFromNetworkId(netId) or 0
+    if entity == 0 or not DoesEntityExist(entity) or GetEntityType(entity) ~= 2 then
+        return false, 'no_vehicle'
+    end
+
+    local coords = GetEntityCoords(entity)
+    local plate = TowLifecycle.cleanPlate(GetVehicleNumberPlateText(entity))
+    if not plate then return false, 'no_vehicle' end
 
     if not ValidateDistance(source, coords, Config.Requests.vehicleRange + 15.0) then
         return false, 'too_far'
     end
 
-    local plate = TowLifecycle.sanitizeLabel(data.plate, 10)
-    if plate == 'Unknown' then return false, 'no_vehicle' end
+    if plateHasOpenJob(plate) then return false, 'already_requested' end
 
     if kind ~= 'impound' then
-        local owns = MySQL.scalar.await('SELECT 1 FROM player_vehicles WHERE citizenid = ? AND plate = ? LIMIT 1', { citizenid, plate })
+        local owns = MySQL.scalar.await(
+            "SELECT 1 FROM player_vehicles WHERE citizenid = ? AND REPLACE(plate, ' ', '') = ? LIMIT 1",
+            { citizenid, plate })
         if not owns then return false, 'not_owner' end
     end
 
     local vehicleCode, vehicleLabel
-    local netId = tonumber(data.netId)
-    local entity = netId and NetworkGetEntityFromNetworkId(netId) or 0
-    if entity ~= 0 and DoesEntityExist(entity) and GetEntityType(entity) == 2 then
-        local ok, entry = pcall(function() return exports.qbx_core:GetVehiclesByHash(GetEntityModel(entity)) end)
-        if not ok or type(entry) ~= 'table' then entry = nil end
-        if entry and type(entry.model) == 'string' then
-            vehicleCode = entry.model:lower()
-            if type(entry.name) == 'string' and entry.name ~= '' then
-                vehicleLabel = ((type(entry.brand) == 'string' and entry.brand ~= '') and (entry.brand .. ' ') or '') .. entry.name
-            end
+    local gotEntry, entry = pcall(function() return exports.qbx_core:GetVehiclesByHash(GetEntityModel(entity)) end)
+    if not gotEntry or type(entry) ~= 'table' then entry = nil end
+    if entry and type(entry.model) == 'string' then
+        vehicleCode = entry.model:lower()
+        if type(entry.name) == 'string' and entry.name ~= '' then
+            vehicleLabel = ((type(entry.brand) == 'string' and entry.brand ~= '') and (entry.brand .. ' ') or '') .. entry.name
         end
     end
 
@@ -170,7 +184,7 @@ local function requestService(source, data)
         requesterSource = source,
         kind = kind,
         fee = fee,
-        netId = tonumber(data.netId),
+        netId = netId,
         locationLabel = TowLifecycle.sanitizeLabel(data.location, 60),
     })
     if not added then return false, 'queue_full' end
@@ -193,6 +207,30 @@ local function requestService(source, data)
     PublishRequest(job)
     PublishQueuePositions()
     return true, TowLifecycle.publicView(job, TowQueue, os.time())
+end
+
+--- The checks inside makeRequest wait for the database, so two requests sent
+--- in the same instant both used to get through. The citizen is marked while
+--- one is being built, and the mark is cleared on every way out, errors too.
+local Requesting = {}
+
+local function requestService(source, data)
+    local player = Bridge.GetPlayer(source)
+    if not player then return false, 'no_player' end
+    if type(data) ~= 'table' then return false, 'bad_request' end
+
+    local citizenid = player.PlayerData.citizenid
+    if Requesting[citizenid] then return false, 'open_request' end
+    Requesting[citizenid] = true
+
+    local ok, a, b = pcall(makeRequest, source, player, data)
+    Requesting[citizenid] = nil
+
+    if not ok then
+        print('[dps-towjob] request failed: ' .. tostring(a))
+        return false, 'bad_request'
+    end
+    return a, b
 end
 
 local function getRequestStatus(source)
