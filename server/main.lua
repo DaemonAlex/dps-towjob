@@ -215,21 +215,22 @@ end)
 -- was handled, a switched-away character stayed in DutyTracker and kept
 -- receiving dispatch offers.
 local function cleanupPlayer(source)
-
-    if PendingOffers and PendingOffers[source] and WithdrawOffer then
-        WithdrawOffer(source, 'disconnect')
-    end
-
     -- Clean up cooldowns
     EventCooldowns[source] = nil
 
     -- Capture duty data before clearing (need citizenid for rating penalty)
     local dutyData = DutyTracker[source]
 
-    -- Clean up duty tracker
+    -- Clean up duty tracker. Before the offer is withdrawn, so the queue check
+    -- inside WithdrawOffer no longer sees this driver as available and cannot
+    -- hand them the same job again on their way out.
     if dutyData then
         TowJob.Debug('Driver disconnected:', source)
         DutyTracker[source] = nil
+    end
+
+    if PendingOffers and PendingOffers[source] and WithdrawOffer then
+        WithdrawOffer(source, 'disconnect')
     end
 
     -- Handle active job cancellation
@@ -262,6 +263,11 @@ local function cleanupPlayer(source)
         if PublishRequest then PublishRequest(job) end
         ActiveJobs[source] = nil
         TowJob.Debug('Requeued job from disconnected driver:', job.id)
+
+        -- Offer it to whoever is left, and let City Tow take it if both of its
+        -- timers have already passed. Otherwise the request waits for good.
+        TriggerEvent('dps-towjob:server:checkQueue')
+        if job.kind and CityTowCheck then CityTowCheck(job.id) end
     end
 
     -- Evict per-citizen caches so they don't grow unbounded (L2).

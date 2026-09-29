@@ -425,7 +425,8 @@ RegisterNetEvent('dps-towjob:server:cancelJob', function(jobId, reason)
     job.state = TowJob.JobState.QUEUED
     job.assignedTo = nil
     job.cancelledBy = source
-    job.cancelReason = reason
+    -- Another client's free text: cleaned and capped before it is stored.
+    job.cancelReason = reason ~= nil and TowLifecycle.sanitizeLabel(reason, 60) or nil
 
     -- Back into the queue by priority and age, and never back to the same driver
     job.etaAt = nil
@@ -457,6 +458,10 @@ RegisterNetEvent('dps-towjob:server:cancelJob', function(jobId, reason)
 
     -- Check for other available drivers
     TriggerEvent('dps-towjob:server:checkQueue')
+
+    -- Both City Tow timers may already have fired while this driver held the
+    -- job. Without this a player request could sit in the queue for good.
+    if job.kind and CityTowCheck then CityTowCheck(job.id) end
 end)
 
 -- Get next repair shop (fair distribution)

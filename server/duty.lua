@@ -38,8 +38,10 @@ RegisterNetEvent('dps-towjob:server:toggleDuty', function(shopId)
             return
         end
 
-        if PendingOffers[source] then WithdrawOffer(source, 'offduty') end
+        -- Out of the duty list first: the queue check inside WithdrawOffer must
+        -- not see this driver as available and hand them the job again.
         DutyTracker[source] = nil
+        if PendingOffers[source] then WithdrawOffer(source, 'offduty') end
 
         if CityTowCheck then
             local ids = {}

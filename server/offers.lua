@@ -93,7 +93,16 @@ local function acceptOffer(source, jobId)
         return false, 'expired'
     end
     if not DutyTracker[source] then
+        -- The menu was still open after clocking out or switching job. Leave no
+        -- dead offer on the job, or no driver is ever offered it again.
         PendingOffers[source] = nil
+        local stale = TowLifecycle.findInQueue(TowQueue, jobId)
+        if stale and stale.offeredTo == source then
+            stale.offeredTo = nil
+            stale.offeredAt = nil
+            TriggerEvent('dps-towjob:server:checkQueue')
+            if stale.kind and CityTowCheck then CityTowCheck(stale.id) end
+        end
         return false, 'no_offer'
     end
 
@@ -102,6 +111,7 @@ local function acceptOffer(source, jobId)
     if not job then
         DutyTracker[source].state = TowJob.DriverState.AVAILABLE
         driverChanged(source)
+        TriggerEvent('dps-towjob:server:checkQueue')
         return false, 'gone'
     end
 

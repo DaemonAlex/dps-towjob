@@ -243,22 +243,46 @@ local function getRequestStatus(source)
     return TowLifecycle.publicView(job, TowQueue, os.time())
 end
 
+--- A requester may call a tow off while it is still in line or while the driver
+--- is on the way. Once the driver has arrived it is too late: no fee has been
+--- taken before the hook, so a cancel here never owes anything back.
 local function cancelRequest(source)
     local player = Bridge.GetPlayer(source)
     if not player then return false, 'no_player' end
     local job = OpenRequests[player.PlayerData.citizenid]
     if not job then return false, 'no_request' end
-    if TowLifecycle.statusFor(job.state) ~= 'queued' then return false, 'too_late' end
+    local status = TowLifecycle.statusFor(job.state)
+    if status ~= 'queued' and status ~= 'accepted' then return false, 'too_late' end
+
+    -- City Tow is already on its way: it has its own timers to stop.
+    if job.cityTow then
+        if not CancelCityTow then return false, 'too_late' end
+        CancelCityTow(job, 'requester')
+        PublishQueuePositions()
+        return true
+    end
 
     local offeredTo = job.offeredTo
+    local driver = job.assignedTo
     TowLifecycle.removeFromQueue(TowQueue, job.id)
     job.state = TowJob.JobState.CANCELLED
     job.cancelReason = 'requester'
     if offeredTo and WithdrawOffer then WithdrawOffer(offeredTo, 'cancelled', job) end
 
+    -- Free the driver who accepted it, so they are not stuck on a job nobody
+    -- wants any more and the requester is not stuck behind them.
+    if driver and ActiveJobs[driver] == job then
+        ActiveJobs[driver] = nil
+        if DutyTracker[driver] then DutyTracker[driver].state = TowJob.DriverState.AVAILABLE end
+        Bridge.Notify(driver, 'Tow Request', 'The caller cancelled that tow.', 'inform')
+        TriggerClientEvent('dps-towjob:client:jobCancelled', driver, DriverJobView and DriverJobView(job) or nil)
+        TriggerEvent('dps-towjob:driverUpdate', driver)
+    end
+
     MySQL.update('UPDATE tow_jobs SET state = ? WHERE id = ?', { job.state, job.id })
     PublishRequest(job)
     PublishQueuePositions()
+    TriggerEvent('dps-towjob:server:checkQueue')
     return true
 end
 
