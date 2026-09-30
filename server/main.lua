@@ -26,6 +26,8 @@ local EventCooldowns = {}
 local COOLDOWN_TIMES = {
     ['vehicleAttached'] = 5000,    -- 5 seconds between attach events
     ['completeJob'] = 10000,       -- 10 seconds between completions
+    ['impoundVehicle'] = 10000,    -- 10 seconds between impound records (its own
+                                   -- key: the client sends both in one frame)
     ['cancelJob'] = 30000,         -- 30 seconds between cancellations
     ['toggleDuty'] = 5000,         -- 5 seconds between duty toggles
     ['collectEarnings'] = 60000,   -- 1 minute between earnings collections
@@ -67,6 +69,19 @@ local function ValidateTowDriver(source)
 
     return true, Player
 end
+
+--- Does this player work in a repair shop or on a tow truck, and are they on
+--- duty? The shop-floor events (a vehicle arriving, a repair starting or
+--- finishing) are only ever sent by these two, so a stranger cannot fire them.
+--- GLOBAL: server/dispatch.lua and bridge/jg-mechanic.lua both use it.
+function IsShopStaff(source)
+    local Player = Bridge.GetPlayer(source)
+    if not Player then return false end
+    local job = Player.PlayerData.job
+    if not job or job.onduty ~= true then return false end
+    return job.name == 'mechanic' or job.name == Config.JobName
+end
+exports('IsShopStaff', IsShopStaff)
 
 -- Server-side validation: Verify player distance from coords
 -- GLOBAL so server/queue.lua, server/pve.lua etc. can enforce arrival checks.
@@ -111,6 +126,7 @@ function GetAvailableDrivers()
         if duty.state == TowJob.DriverState.AVAILABLE then
             available[#available + 1] = {
                 source = src,
+                citizenid = duty.citizenid,
                 shop = duty.shop,
                 clockedInAt = duty.clockedInAt,
                 lastTowCompleted = duty.lastTowCompleted,
@@ -214,17 +230,22 @@ end)
 -- was handled, a switched-away character stayed in DutyTracker and kept
 -- receiving dispatch offers.
 local function cleanupPlayer(source)
-
     -- Clean up cooldowns
     EventCooldowns[source] = nil
 
     -- Capture duty data before clearing (need citizenid for rating penalty)
     local dutyData = DutyTracker[source]
 
-    -- Clean up duty tracker
+    -- Clean up duty tracker. Before the offer is withdrawn, so the queue check
+    -- inside WithdrawOffer no longer sees this driver as available and cannot
+    -- hand them the same job again on their way out.
     if dutyData then
         TowJob.Debug('Driver disconnected:', source)
         DutyTracker[source] = nil
+    end
+
+    if PendingOffers and PendingOffers[source] and WithdrawOffer then
+        WithdrawOffer(source, 'disconnect')
     end
 
     -- Handle active job cancellation
@@ -248,9 +269,20 @@ local function cleanupPlayer(source)
         -- Requeue the job
         job.state = TowJob.JobState.QUEUED
         job.assignedTo = nil
-        table.insert(TowQueue, 1, job)
+        job.etaAt = nil
+        job.driverName = nil
+        job.accepted = nil
+        job.declined = job.declined or {}
+        if citizenid then job.declined[citizenid] = true end
+        TowLifecycle.insertByPriority(TowQueue, job)
+        if PublishRequest then PublishRequest(job) end
         ActiveJobs[source] = nil
         TowJob.Debug('Requeued job from disconnected driver:', job.id)
+
+        -- Offer it to whoever is left, and let City Tow take it if both of its
+        -- timers have already passed. Otherwise the request waits for good.
+        TriggerEvent('dps-towjob:server:checkQueue')
+        if job.kind and CityTowCheck then CityTowCheck(job.id) end
     end
 
     -- Evict per-citizen caches so they don't grow unbounded (L2).
@@ -411,10 +443,16 @@ lib.callback.register('dps-towjob:server:getQueueInfo', function(source)
     local valid, _ = ValidateTowDriver(source)
     if not valid then return nil end
 
+    -- Sanitised: the raw jobs carry the requester's citizen id and the ids of
+    -- every driver who declined.
+    local queue, active = {}, {}
+    for i = 1, #TowQueue do queue[i] = DriverJobView(TowQueue[i]) end
+    for src, job in pairs(ActiveJobs) do active[src] = DriverJobView(job) end
+
     return {
-        queue = TowQueue,
+        queue = queue,
         length = #TowQueue,
-        activeJobs = ActiveJobs,
+        activeJobs = active,
         drivers = GetAvailableDrivers()
     }
 end)
@@ -454,12 +492,38 @@ lib.callback.register('dps-towjob:server:canClockIn', function(source, shopId)
     return true
 end)
 
+--- Write an impound record. towedBy is a citizenid, or 'CITYTOW'.
+function RecordImpound(plate, impoundId, towedBy, jobId)
+    local impound = Config.ImpoundLots[impoundId]
+    if not impound or not plate then return false end
+
+    MySQL.insert.await([[
+        INSERT INTO tow_impound_vehicles (plate, impound_lot, towed_by, tow_job_id, fee_base, fee_per_day)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            impound_lot = VALUES(impound_lot),
+            towed_by = VALUES(towed_by),
+            tow_job_id = VALUES(tow_job_id),
+            impounded_at = CURRENT_TIMESTAMP,
+            released_at = NULL,
+            released_by = NULL
+    ]], { plate, impoundId, towedBy, jobId, impound.fee.base, impound.fee.perDay })
+
+    MySQL.update.await([[
+        UPDATE player_vehicles SET state = 2 WHERE plate = ?
+    ]], { plate })
+
+    TowJob.Debug('Vehicle impounded:', plate, 'at', impoundId)
+    return true
+end
+
 -- Track impound vehicle location
 RegisterNetEvent('dps-towjob:server:impoundVehicle', function(plate, impoundId)
     local source = source
 
-    -- Validate
-    if IsOnCooldown(source, 'completeJob') then return end
+    -- Validate. Its own cooldown key: the client sends impoundVehicle and
+    -- completeJob back to back, so a shared key refused the second of them.
+    if IsOnCooldown(source, 'impoundVehicle') then return end
 
     local valid, Player = ValidateTowDriver(source)
     if not valid then return end
@@ -485,40 +549,18 @@ RegisterNetEvent('dps-towjob:server:impoundVehicle', function(plate, impoundId)
     end
     -- Must have actually towed this plate: reject if no attached vehicle on the
     -- job (nil vehiclePlate) or a mismatch - previously nil short-circuited the guard.
-    if not job.vehiclePlate or not plate or job.vehiclePlate ~= plate then
+    -- Compared the same way the hook compares it: the game pads a plate shorter
+    -- than eight characters, so an exact match lost every vanity plate.
+    local want = TowLifecycle.cleanPlate(job.vehiclePlate)
+    local sent = TowLifecycle.cleanPlate(plate)
+    if not want or sent ~= want then
         TowJob.Debug('Impound plate mismatch:', source, 'job:', tostring(job.vehiclePlate), 'sent:', tostring(plate))
         lib.notify(source, { title = 'Error', description = 'That is not the vehicle you towed', type = 'error' })
         return
     end
 
-    local citizenid = Player.PlayerData.citizenid
-
-    -- Store in impound tracking
-    MySQL.insert.await([[
-        INSERT INTO tow_impound_vehicles (plate, impound_lot, towed_by, tow_job_id, fee_base, fee_per_day)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-            impound_lot = VALUES(impound_lot),
-            towed_by = VALUES(towed_by),
-            tow_job_id = VALUES(tow_job_id),
-            impounded_at = CURRENT_TIMESTAMP,
-            released_at = NULL,
-            released_by = NULL
-    ]], {
-        plate,
-        impoundId,
-        citizenid,
-        job and job.id or nil,
-        impound.fee.base,
-        impound.fee.perDay
-    })
-
-    -- Update player_vehicles state
-    MySQL.update.await([[
-        UPDATE player_vehicles SET state = 2 WHERE plate = ?
-    ]], { plate })
-
-    TowJob.Debug('Vehicle impounded:', plate, 'at', impoundId)
+    -- The server's own record of the plate, never the client's text.
+    RecordImpound(job.vehiclePlate, impoundId, Player.PlayerData.citizenid, job.id)
 end)
 
 -- Get vehicle impound location

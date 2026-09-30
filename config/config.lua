@@ -104,3 +104,28 @@ Config.Blips = {
 
 -- Notification settings
 Config.NotifyDuration = 5000
+
+-- Service requests from the City Services app (dps-services).
+-- Every number here comes from the approved design of 2026-09-29.
+Config.Requests = {
+    cooldownSec = 120,        -- seconds between two requests by the same player
+    offerTimeoutSec = 45,     -- a driver has this long to answer an offer
+    noDriverGraceSec = 20,    -- nobody can take it: City Tow steps in after this
+    maxWaitSec = 180,         -- drivers on duty, nobody accepted: City Tow steps in
+    repairTowFee = 200,       -- charged to the requester when the vehicle is hooked
+    emergencyTowFee = 0,      -- police, EMS and fire impound requests
+    -- What the owner pays the garage script to take an impounded vehicle out
+    -- again. Written into impound_data.retrieval_cost. Change it to suit.
+    impoundReleaseFee = 500,
+    emergencyJobTypes = { leo = true, ems = true },
+    vehicleRange = 10.0,      -- the vehicle must be this close to the requester
+    arriveRadius = 30.0,      -- a driver this close to the pickup has arrived
+    driverSpeedMps = 18.0,    -- used for a player driver's ETA
+    cityTow = {
+        name = 'City Tow',
+        speedMps = 12.0,
+        minEtaSec = 240,
+        maxEtaSec = 480,
+        hookSec = 25,
+    },
+}

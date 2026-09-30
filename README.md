@@ -2,13 +2,16 @@
 
 A comprehensive, queue-based tow job system for FiveM with dispatch dashboard, jg-mechanic integration, and NPC "predatory" towing.
 
-![Version](https://img.shields.io/badge/version-2.7.0-blue)
+![Version](https://img.shields.io/badge/version-2.9.0-blue)
 ![Framework](https://img.shields.io/badge/framework-QB%20%7C%20QBX%20%7C%20ESX-green)
 ![License](https://img.shields.io/badge/license-GPL--3.0-orange)
 
 ## Features
 
 ### Core Systems
+- **Service Requests** - Players ask for a tow from the City Services app
+  (`dps-services`). Offers, City Tow backup, fees, and a hand-off that puts the
+  vehicle in a garage or an impound lot the owner can reach
 - **Queue-Based Dispatch** - Fair job distribution with priority handling
 - **NUI Dispatch Dashboard** - Visual management interface (F6)
 - **Multi-Location Impound** - City, Sandy Shores, and Paleto lots
@@ -111,6 +114,23 @@ Config.Queue = {
     pveInterval = 300000,   -- 5 minutes
     maxPveActive = 3,
 }
+
+-- Service requests from the City Services app. Every number is from the
+-- approved design; see "Service requests" below.
+Config.Requests = {
+    cooldownSec = 120,        -- between two requests by the same player
+    offerTimeoutSec = 45,     -- a driver has this long to answer an offer
+    noDriverGraceSec = 20,    -- nobody can take it: City Tow steps in
+    maxWaitSec = 180,         -- drivers on duty, nobody accepted: City Tow steps in
+    repairTowFee = 200,       -- charged when the vehicle is hooked
+    emergencyTowFee = 0,      -- police, EMS and fire impound requests
+    impoundReleaseFee = 500,  -- written into impound_data.retrieval_cost
+    emergencyJobTypes = { leo = true, ems = true },
+    vehicleRange = 10.0,
+    arriveRadius = 30.0,
+    driverSpeedMps = 18.0,
+    cityTow = { name = 'City Tow', speedMps = 12.0, minEtaSec = 240, maxEtaSec = 480, hookSec = 25 },
+}
 ```
 
 ### config/impound.lua
@@ -138,6 +158,13 @@ Config.ImpoundLots = {
 | `/calltow` | - | Request a tow (for customers) |
 
 > **Note:** F6, F7, and G keybinds only activate for players with the tow job. They use conditional input polling, not `RegisterKeyMapping`, so they never globally reserve keys from other players or resources.
+
+### Server console only
+| Command | Description |
+|---------|-------------|
+| `towtest [impound]` | A dry-run request at Legion Square with the timers at 5% length. Writes no impound, ticket or payment rows and moves no vehicle. |
+| `requestdebug` | Every open request: status, place in line, ETA, driver, destination, fee. |
+| `towdebug` | Queue, active jobs, duty tracker, cooldowns (only when `Config.Debug`). |
 
 ### Player Workflow
 1. Clock in at a tow depot
@@ -184,6 +211,38 @@ Drivers can earn commission by towing illegally parked NPC vehicles:
 | - Cancelled jobs requeue at front        |
 +------------------------------------------+
 ```
+
+## Service requests (2.9.0)
+
+A player asks for a tow from the City Services app (`dps-services`). The app
+decides nothing: it calls the exports below and shows what comes back.
+
+| | |
+|---|---|
+| Who may ask | Anyone may ask for a **repair** tow of a vehicle registered to them. Only an on-duty player whose job type is `leo` or `ems` may ask for an **impound** tow. |
+| Fee | Repair $200, impound $0. Charged when the vehicle is hooked, never at request time. Given back in full if the tow does not happen. |
+| Priority | Impound HIGH, repair NORMAL, AI calls LOW. |
+| Offers | A queued request is offered to one driver at a time for 45 s. Declining or letting it run out costs no rating and never comes back to that driver. |
+| City Tow | Steps in after 180 s when drivers are on duty and nobody accepted, after 20 s when no driver can take it. Arrives in 4 to 8 minutes, hooks in 25 s. AI calls never go to City Tow. |
+| Limits | One open request per player, 120 s between requests, and one request per vehicle. |
+| Hand-off | At delivery the vehicle is filed where the owner can collect it: a repair tow that left the world goes into the nearest public car garage, an impound tow into the nearest impound lot with `impound_data`. `dps-vehiclepersistence` is told either way. A repair tow a player driver leaves standing at the shop is not filed: it is already there. |
+
+### Exports used by the app
+```lua
+exports['dps-towjob']:RequestService(source, { kind, netId, location })
+exports['dps-towjob']:GetRequestStatus(source)
+exports['dps-towjob']:CancelRequest(source)      -- while in line or on the way
+exports['dps-towjob']:GetRequestConfig()
+exports['dps-towjob']:AcceptOffer(source, jobId)
+exports['dps-towjob']:DeclineOffer(source, jobId)
+exports['dps-towjob']:GetDriverView(source)      -- nil for anyone without the tow job
+exports['dps-towjob']:HandOffVehicle(job)
+```
+
+### Server events the app listens to
+`dps-towjob:requestUpdate` (citizenid, view, changed) and
+`dps-towjob:driverUpdate` (source). Neither is a net event, so no client can
+fire them.
 
 ## Payment Flow
 
@@ -318,6 +377,23 @@ Tables are auto-created on resource start. See `sql/schema.sql` for the full sch
 | `tow_dispute_logs` | Predatory towing dispute outcomes |
 
 ## Changelog
+
+### v2.9.0
+- Service requests from the City Services app: offers with a 45 s answer window,
+  the City Tow backup, per-request fees, and the five status steps the app shows
+- Hand-off at delivery (`server/handoff.lua`): a towed vehicle is filed into a
+  garage or an impound lot, and `dps-vehiclepersistence` is told
+- A fee is given back when the tow does not happen; `fee_paid = 2` means a refund
+  is owed and is paid when the player next opens the app
+- `tow_jobs` gains `kind`, `fee` and `fee_paid`, added at start, safe to run twice
+- Repair tows only go to shops whose `mechanicJob` is a job on this server
+- A requester may cancel while the driver is on the way; a requeued job is
+  offered again and can still fall to City Tow
+- `impoundVehicle` has its own anti-spam key and compares plates without the
+  padding the game adds, so vanity plates are recorded
+- `QBCore:Server:OnJobUpdate` is a server-side handler, not a net event
+- AI calls every on-duty driver passed on leave the queue and free their slot
+- `towtest` and `requestdebug` console commands
 
 ### v2.7.0
 - Added settlement system for NPC disputes

@@ -43,8 +43,10 @@ function TowJob.SplitPayment(total)
     return driverCut, shopCut
 end
 
--- Get zone name from coords
+-- Get zone name from coords. GetNameOfZone is a client native, so the server
+-- gets nil and must use the label the requester's client supplied.
 function TowJob.GetZoneName(coords)
+    if IsDuplicityVersion() then return nil end
     return GetNameOfZone(coords.x, coords.y, coords.z)
 end
 
@@ -71,6 +73,7 @@ TowJob.JobTypes = {
     CUSTOMER = 'customer',
     POLICE = 'police',
     EMS = 'ems',
+    PREDATORY = 'predatory',
 }
 
 -- Job priorities
@@ -95,6 +98,7 @@ end
 TowJob.DriverState = {
     OFF_DUTY = 'off_duty',
     AVAILABLE = 'available',
+    OFFERED = 'offered',
     BUSY = 'busy',
 }
 

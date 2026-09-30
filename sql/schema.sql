@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS `tow_jobs` (
     `payment` INT DEFAULT 0,
     `damage_on_pickup` INT DEFAULT 0,
     `damage_on_dropoff` INT DEFAULT 0,
+    -- 2.9.0 service requests. server/requests.lua adds these three at start
+    -- with ADD COLUMN IF NOT EXISTS, so an existing table needs no manual SQL.
+    `kind` VARCHAR(20) DEFAULT NULL COMMENT 'repair, impound; NULL for an AI call',
+    `fee` INT NOT NULL DEFAULT 0 COMMENT 'charged to the requester when the vehicle is hooked',
+    `fee_paid` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '0 not paid, 1 paid, 2 refund owed',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `completed_at` TIMESTAMP NULL,
     INDEX `state` (`state`),

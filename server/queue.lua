@@ -25,7 +25,13 @@ function AddToQueue(request)
         state = TowJob.JobState.QUEUED,
         assignedTo = nil,
         createdAt = os.time(),
-        zone = TowJob.GetZoneName(request.coords),
+        zone = request.locationLabel or TowJob.GetZoneName(request.coords) or 'Unknown',
+        kind = request.kind,
+        fee = request.fee or 0,
+        netId = request.netId,
+        vehicleCode = request.code,
+        test = request.test,
+        declined = {},
         -- Preserve PVE / predatory metadata so the server stays authoritative
         -- over commission (settlement math), dispatch display, and cleanup.
         pveId = request.pveId,
@@ -34,19 +40,7 @@ function AddToQueue(request)
         commission = request.commission,
     }
 
-    -- Insert based on priority
-    local inserted = false
-    for i, queuedJob in ipairs(TowQueue) do
-        if job.priority > queuedJob.priority then
-            table.insert(TowQueue, i, job)
-            inserted = true
-            break
-        end
-    end
-
-    if not inserted then
-        table.insert(TowQueue, job)
-    end
+    TowLifecycle.insertByPriority(TowQueue, job)
 
     TowJob.Debug('Job added to queue:', job.id, job.type)
 
@@ -87,36 +81,56 @@ exports('RequestTow', function(source, coords, towType, priority)
     })
 end)
 
--- Check queue for available assignments
+-- Offer queued jobs to available drivers, oldest-idle driver first.
 AddEventHandler('dps-towjob:server:checkQueue', function()
     if #TowQueue == 0 then return end
 
-    local availableDrivers = GetAvailableDrivers()
-    if #availableDrivers == 0 then return end
+    local available = GetAvailableDrivers()
+    if #available == 0 then return end
 
-    for _, driver in ipairs(availableDrivers) do
-        if #TowQueue == 0 then break end
-
-        local job = TowQueue[1]
-
-        -- Check if driver on PVE should get PVP job
-        if job.type ~= TowJob.JobTypes.PVE and DutyTracker[driver.source] then
-            local currentJob = ActiveJobs[driver.source]
-            if currentJob and currentJob.type == TowJob.JobTypes.PVE then
-                -- Skip this driver, they're on PVE and there are other drivers
-                if #availableDrivers > 1 then
-                    goto continue
+    for i = 1, #TowQueue do
+        local job = TowQueue[i]
+        if job and not job.offeredTo and not job.cityTow and not job.test then
+            local driver = TowLifecycle.nextDriver(available, job)
+            if driver and OfferJob(driver.source, job) then
+                for k = #available, 1, -1 do
+                    if available[k].source == driver.source then table.remove(available, k) end
                 end
+                if #available == 0 then break end
             end
         end
-
-        -- Assign job
-        table.remove(TowQueue, 1)
-        AssignJobToDriver(driver.source, job)
-
-        ::continue::
     end
 end)
+
+--- What a driver's client is given about a job: what their screen shows and
+--- nothing else. No requester citizen id, no list of drivers who declined.
+function DriverJobView(job)
+    if type(job) ~= 'table' then return nil end
+    return {
+        id = job.id,
+        type = job.type,
+        kind = job.kind,
+        state = job.state,
+        priority = job.priority,
+        zone = job.zone,
+        pickupCoords = job.pickupCoords,
+        vehiclePlate = job.vehiclePlate,
+        vehicleModel = job.vehicleModel,
+        vehicleCode = job.vehicleCode,
+        violation = job.violation,
+        violationText = job.violationText,
+        commission = job.commission,
+        pveId = job.pveId,
+        destination = job.destination,
+        destinationLabel = job.destinationLabel,
+        accepted = job.accepted,
+        payment = job.payment,
+        createdAt = job.createdAt,
+        -- a server id, not an identity: roadside billing needs it to bill the
+        -- caller standing in front of the driver
+        requesterSource = job.requesterSource,
+    }
+end
 
 -- Assign job to driver
 function AssignJobToDriver(source, job)
@@ -138,19 +152,12 @@ function AssignJobToDriver(source, job)
     })
 
     -- Notify driver
-    TriggerClientEvent('dps-towjob:client:jobAssigned', source, job)
+    TriggerClientEvent('dps-towjob:client:jobAssigned', source, DriverJobView(job))
 
-    -- Notify requester if applicable
-    if job.requesterSource then
-        local Player = assignPlayer
-        local driverName = Player and (Player.PlayerData.charinfo.firstname .. ' ' .. Player.PlayerData.charinfo.lastname) or 'A driver'
-
-        TriggerClientEvent('ox_lib:notify', job.requesterSource, {
-            title = 'Tow Service',
-            description = 'Driver ' .. driverName .. ' is en route',
-            type = 'success'
-        })
-    end
+    local charinfo = assignPlayer and assignPlayer.PlayerData and assignPlayer.PlayerData.charinfo
+    job.driverName = charinfo and (charinfo.firstname .. ' ' .. charinfo.lastname) or 'A driver'
+    PublishRequest(job)
+    PublishQueuePositions()
 
     TowJob.Debug('Job assigned:', job.id, 'to driver:', source)
 end
@@ -175,7 +182,8 @@ RegisterNetEvent('dps-towjob:server:acceptJob', function(jobId)
         UPDATE tow_jobs SET state = ? WHERE id = ?
     ]], { job.state, job.id })
 
-    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, job)
+    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, DriverJobView(job))
+    PublishRequest(job)
     TowJob.Debug('Job accepted:', job.id)
 end)
 
@@ -185,16 +193,75 @@ RegisterNetEvent('dps-towjob:server:arrivedOnScene', function(jobId)
     local job = ActiveJobs[source]
 
     if not job or job.id ~= jobId then return end
+    if job.state ~= TowJob.JobState.ASSIGNED and job.state ~= TowJob.JobState.EN_ROUTE then return end
+    if not ValidateDistance(source, job.pickupCoords, Config.Requests.arriveRadius + 15.0) then return end
 
     job.state = TowJob.JobState.ON_SCENE
+    job.etaAt = nil
 
     MySQL.update.await([[
         UPDATE tow_jobs SET state = ? WHERE id = ?
     ]], { job.state, job.id })
 
-    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, job)
+    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, DriverJobView(job))
+    PublishRequest(job)
     TowJob.Debug('Driver on scene:', job.id)
 end)
+
+local RealJob = {}   -- job name -> true / false, asked once per server run
+
+--- Is this the name of a job somebody can actually hold on this server? Four
+--- shops in config/shops.lua name vendor jobs that do not exist here, so a car
+--- sent to them lands in a queue nobody can ever open.
+local function jobExists(name)
+    if type(name) ~= 'string' or name == '' then return false end
+    if RealJob[name] ~= nil then return RealJob[name] end
+    local ok, job = pcall(function() return exports.qbx_core:GetJob(name) end)
+    -- Only a real answer is remembered. A lookup that threw (the framework is
+    -- not up yet) must not leave every shop marked "not a job" for the rest of
+    -- the run, which would leave ChooseDestination with nowhere to send a car.
+    if not ok then
+        TowJob.Debug('GetJob failed for', name, '- answer not cached')
+        return false
+    end
+    RealJob[name] = job ~= nil
+    return RealJob[name]
+end
+
+--- Where a hooked vehicle goes. Impound requests go to the nearest impound lot,
+--- everything else to a repair shop. driverSource is nil for City Tow.
+function ChooseDestination(job, driverSource)
+    if job.type == TowJob.JobTypes.POLICE or job.type == TowJob.JobTypes.EMS or job.kind == 'impound' then
+        local impoundId = GetNearestImpound(job.pickupCoords)
+        local lot = impoundId and Config.ImpoundLots[impoundId]
+        if lot then
+            job.destination = { type = TowJob.DestinationType.IMPOUND, id = impoundId, coords = lot.dropoff }
+            job.destinationLabel = lot.label or impoundId
+            return job.destination
+        end
+    end
+
+    local shopId = GetNextRepairShop() or (driverSource and GetDriverShop(driverSource)) or nil
+    if not shopId then
+        local best
+        for id, shop in pairs(Config.ShopJobMapping) do
+            if shop.towShop and shop.vehicleDropoff and jobExists(shop.mechanicJob) then
+                local d = #(shop.vehicleDropoff - job.pickupCoords)
+                if not best or d < best then
+                    best = d
+                    shopId = id
+                end
+            end
+        end
+    end
+    if shopId and Config.ShopJobMapping[shopId] then
+        local shop = Config.ShopJobMapping[shopId]
+        job.destination = { type = TowJob.DestinationType.SHOP, id = shopId, coords = shop.vehicleDropoff }
+        job.destinationLabel = shop.label or shopId
+        return job.destination
+    end
+    return nil
+end
 
 -- Vehicle attached
 -- H2: this is the ONLY transition into TOWING, and completeJob requires TOWING.
@@ -226,41 +293,27 @@ RegisterNetEvent('dps-towjob:server:vehicleAttached', function(jobId, vehicleDat
         return
     end
 
-    job.state = TowJob.JobState.TOWING
-    job.vehiclePlate = vehicleData.plate
-    job.vehicleModel = vehicleData.model
-    job.pickupLocation = vehicleData.location
-
-    -- Determine destination
-    if job.type == TowJob.JobTypes.POLICE then
-        -- Police tows go to nearest impound
-        local nearestImpound = GetNearestImpound(job.pickupCoords)
-        job.destination = {
-            type = TowJob.DestinationType.IMPOUND,
-            id = nearestImpound,
-            coords = Config.ImpoundLots[nearestImpound].dropoff
-        }
-    else
-        -- Repair tows go to shop with longest wait and on-duty mechanics
-        local shopId = GetNextRepairShop()
-        if shopId then
-            job.destination = {
-                type = TowJob.DestinationType.SHOP,
-                id = shopId,
-                coords = Config.ShopJobMapping[shopId].vehicleDropoff
-            }
-        else
-            -- Fallback to driver's shop
-            local driverShop = GetDriverShop(source)
-            if driverShop then
-                job.destination = {
-                    type = TowJob.DestinationType.SHOP,
-                    id = driverShop,
-                    coords = Config.ShopJobMapping[driverShop].vehicleDropoff
-                }
-            end
+    local sentPlate = TowLifecycle.sanitizeLabel(vehicleData.plate, 10)
+    if job.kind then
+        -- A player request keeps what the server recorded when it was made.
+        -- The driver's client may only confirm it is the same vehicle.
+        local want = (job.vehiclePlate or ''):gsub('%s+', ''):upper()
+        local got = (sentPlate == 'Unknown' and '' or sentPlate):gsub('%s+', ''):upper()
+        if want == '' or got ~= want then
+            Bridge.Notify(source, 'Tow', 'That is not the vehicle on this request. Check the plate.', 'error')
+            TowJob.Debug('Rejected vehicleAttached: plate mismatch', source, jobId)
+            return
         end
+    else
+        job.vehiclePlate = sentPlate
+        job.vehicleModel = TowLifecycle.sanitizeLabel(vehicleData.model, 30)
+        job.pickupLocation = TowLifecycle.sanitizeLabel(vehicleData.location, 60)
     end
+    job.state = TowJob.JobState.TOWING
+
+    ChooseDestination(job, source)
+    job.etaAt = nil
+    ChargeRequestFee(job)
 
     MySQL.update.await([[
         UPDATE tow_jobs SET state = ?, vehicle_plate = ?, vehicle_model = ?, dropoff_coords = ? WHERE id = ?
@@ -272,7 +325,8 @@ RegisterNetEvent('dps-towjob:server:vehicleAttached', function(jobId, vehicleDat
         job.id
     })
 
-    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, job)
+    TriggerClientEvent('dps-towjob:client:jobStateChanged', source, DriverJobView(job))
+    PublishRequest(job)
     TowJob.Debug('Vehicle attached:', job.id, 'destination:', job.destination and job.destination.id)
 end)
 
@@ -307,6 +361,14 @@ RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
     end
 
     job.state = TowJob.JobState.COMPLETED
+    if job.kind and job.feeCharged and (job.fee or 0) > 0 then
+        local driverShop = GetDriverShop(source)
+        if driverShop then AddToShopFund(driverShop, job.fee, 'Tow fee ' .. job.id) end
+    end
+    -- The vehicle has to end up where the app says it is. Once per job, before
+    -- the requester is told it was delivered.
+    if job.kind and HandOffVehicle then HandOffVehicle(job) end
+    PublishRequest(job)
     job.completedAt = os.time()
 
     -- Calculate payment SERVER-SIDE from server-tracked pickup/destination.
@@ -371,7 +433,7 @@ RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
     end
 
     -- Notify driver
-    TriggerClientEvent('dps-towjob:client:jobCompleted', source, job)
+    TriggerClientEvent('dps-towjob:client:jobCompleted', source, DriverJobView(job))
 
     TowJob.Debug('Job completed:', job.id, 'payment:', totalPayment)
 
@@ -413,20 +475,18 @@ RegisterNetEvent('dps-towjob:server:cancelJob', function(jobId, reason)
     job.state = TowJob.JobState.QUEUED
     job.assignedTo = nil
     job.cancelledBy = source
-    job.cancelReason = reason
+    -- Another client's free text: cleaned and capped before it is stored.
+    job.cancelReason = reason ~= nil and TowLifecycle.sanitizeLabel(reason, 60) or nil
 
-    -- Insert back based on original timestamp
-    local inserted = false
-    for i, queuedJob in ipairs(TowQueue) do
-        if job.createdAt < queuedJob.createdAt then
-            table.insert(TowQueue, i, job)
-            inserted = true
-            break
-        end
+    -- Back into the queue by priority and age, and never back to the same driver
+    job.etaAt = nil
+    job.driverName = nil
+    job.accepted = nil
+    if DutyTracker[source] and DutyTracker[source].citizenid then
+        job.declined[DutyTracker[source].citizenid] = true
     end
-    if not inserted then
-        table.insert(TowQueue, job)
-    end
+    TowLifecycle.insertByPriority(TowQueue, job)
+    if PublishRequest then PublishRequest(job) end
 
     -- Clear active job
     ActiveJobs[source] = nil
@@ -442,12 +502,16 @@ RegisterNetEvent('dps-towjob:server:cancelJob', function(jobId, reason)
         type = 'inform'
     })
 
-    TriggerClientEvent('dps-towjob:client:jobCancelled', source, job)
+    TriggerClientEvent('dps-towjob:client:jobCancelled', source, DriverJobView(job))
 
     TowJob.Debug('Job cancelled:', job.id, 'reason:', reason)
 
     -- Check for other available drivers
     TriggerEvent('dps-towjob:server:checkQueue')
+
+    -- Both City Tow timers may already have fired while this driver held the
+    -- job. Without this a player request could sit in the queue for good.
+    if job.kind and CityTowCheck then CityTowCheck(job.id) end
 end)
 
 -- Get next repair shop (fair distribution)

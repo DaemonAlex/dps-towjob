@@ -386,19 +386,13 @@ function CompleteDropoff(destinationId, destinationType)
     if not detachedVehicle then return end
 
     local plate = GetVehicleNumberPlateText(detachedVehicle)
-    local model = GetDisplayNameFromVehicleModel(GetEntityModel(detachedVehicle))
 
     if destinationType == TowJob.DestinationType.IMPOUND then
         TriggerServerEvent('dps-towjob:server:impoundVehicle', plate, destinationId)
         DeleteEntity(detachedVehicle)
     else
-        TriggerServerEvent('dps-towjob:server:createServiceTicket', destinationId, {
-            plate = plate,
-            model = model,
-            owner = CurrentJob.requesterId
-        }, {
-            source = CurrentJob.requesterSource
-        })
+        -- The server writes the ticket from its own record of the job.
+        TriggerServerEvent('dps-towjob:server:createServiceTicket', destinationId)
         SetVehicleDoorsLocked(detachedVehicle, 1)
         SetVehicleHandbrake(detachedVehicle, true)
     end

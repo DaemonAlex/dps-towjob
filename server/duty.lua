@@ -38,7 +38,19 @@ RegisterNetEvent('dps-towjob:server:toggleDuty', function(shopId)
             return
         end
 
+        -- Out of the duty list first: the queue check inside WithdrawOffer must
+        -- not see this driver as available and hand them the job again.
         DutyTracker[source] = nil
+        if PendingOffers[source] then WithdrawOffer(source, 'offduty') end
+
+        if CityTowCheck then
+            local ids = {}
+            for i = 1, #TowQueue do
+                if TowQueue[i].kind then ids[#ids + 1] = TowQueue[i].id end
+            end
+            for i = 1, #ids do CityTowCheck(ids[i]) end
+        end
+
         Bridge.SetDuty(source, false)
 
         lib.notify(source, {
@@ -126,6 +138,16 @@ end
 
 exports('GetDriverShop', GetDriverShop)
 
+--- Everyone clocked in right now, busy or not, in the shape the lifecycle
+--- helpers expect. Used to decide whether a job has run out of drivers.
+function GetDutyDrivers()
+    local drivers = {}
+    for src, duty in pairs(DutyTracker) do
+        drivers[#drivers + 1] = { source = src, citizenid = duty.citizenid }
+    end
+    return drivers
+end
+
 -- Check if driver is on duty
 function IsDriverOnDuty(source)
     return DutyTracker[source] ~= nil
@@ -141,8 +163,9 @@ end
 
 exports('GetDriverState', GetDriverState)
 
--- Sync with QBCore duty changes
-RegisterNetEvent('QBCore:Server:OnJobUpdate', function(source, job)
+-- Sync with QBCore duty changes. A server-side handler only: as a net event any
+-- client could send another driver's id and knock them off duty.
+AddEventHandler('QBCore:Server:OnJobUpdate', function(source, job)
     if job.name ~= Config.JobName then
         -- Player changed jobs, remove from duty tracker
         if DutyTracker[source] then

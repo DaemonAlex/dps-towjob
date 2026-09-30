@@ -120,8 +120,12 @@ end
 
 -- Command to open dispatch (chat only, F6 handled in thread below)
 RegisterCommand('dispatch', function()
-    if not Bridge.HasJob(Config.JobName) then
-        Bridge.Notify('Tow Job', 'You are not a tow driver', 'error')
+    -- DPS 2026-09-29 (Damon): silent for anyone who is not a tow driver. Police
+    -- and EMS bind F6 to their own dispatch, so other players pressing F6 landed
+    -- here and got an error for a job they do not have.
+    if not Bridge.HasJob(Config.JobName) then return end
+    if not Bridge.IsOnDuty() then
+        Bridge.Notify('Tow Job', 'Go on duty to open tow dispatch', 'error')
         return
     end
     OpenDispatchUI()
