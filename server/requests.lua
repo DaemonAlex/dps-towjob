@@ -318,7 +318,7 @@ exports('GetRequestConfig', function()
         emergencyTowFee = r.emergencyTowFee,
         vehicleRange = r.vehicleRange,
         emergencyJobTypes = r.emergencyJobTypes,
-        jobName = Config.JobName,
+        towJobs = Config.TowJobs,
     }
 end)
 

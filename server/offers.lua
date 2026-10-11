@@ -172,7 +172,7 @@ local function getDriverView(source)
     local player = Bridge.GetPlayer(source)
     if not player then return nil end
     local job = player.PlayerData.job
-    if not job or job.name ~= Config.JobName then return nil end
+    if not TowJob.CanTow(job) then return nil end
 
     local view = { onDuty = DutyTracker[source] ~= nil }
     local pending = PendingOffers[source]

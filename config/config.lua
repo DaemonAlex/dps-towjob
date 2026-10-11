@@ -12,8 +12,15 @@ Config.Debug = false
 -- Use ox_lib for UI
 Config.UseOxLib = true
 
--- Job name
-Config.JobName = 'tow'
+-- Jobs that take tow calls, and the rank each one starts towing at
+-- (Damon 2026-10-11: Camel Tow at every rank, the repair shops from Tow Driver).
+-- The old 'tow' job (City Tow) is not listed: Camel Tow replaced it.
+Config.TowJobs = {
+    cameltow = 0,
+    lscustoms = 1,
+    bayareacustoms = 1,
+    sandymechanic = 1,
+}
 
 -- Payment settings
 Config.Payment = {
