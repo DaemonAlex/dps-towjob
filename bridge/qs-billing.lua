@@ -22,9 +22,11 @@ function CreateTowBill(driverSource, customerSource, amount, description)
         return false
     end
 
-    local shopId = GetDriverShop(driverSource)
-    local shop = shopId and Config.ShopJobMapping[shopId]
-    local societyName = shop and shop.societyName or 'mechanic'
+    -- The bill pays the driver's own company (Camel Tow or their shop), not
+    -- the depot they clocked in at.
+    local driver = Bridge.GetPlayer(driverSource)
+    local driverJob = driver and driver.PlayerData.job
+    local societyName = TowJob.CanTow(driverJob) and driverJob.name or 'mechanic'
 
     -- Create bill using qs-billing export
     exports['qs-billing']:CreateBill({
@@ -49,7 +51,7 @@ RegisterNetEvent('dps-towjob:server:billCustomer', function(customerSource, amou
     local source = source
 
     -- Sender must be an on-duty tow driver
-    if not IsDriverOnDuty(source) or not Bridge.HasJob(source, Config.JobName) then
+    if not IsDriverOnDuty(source) or not IsTowDriver(source) then
         TowJob.Debug('billCustomer rejected: not an on-duty tow driver', source)
         return
     end
@@ -203,7 +205,7 @@ RegisterNetEvent('dps-towjob:server:roadsideBill', function(customerSource, serv
 
     -- Same trust boundary as billCustomer: only an on-duty driver, a clamped
     -- amount (prefer the configured service price), and a nearby target.
-    if not IsDriverOnDuty(source) or not Bridge.HasJob(source, Config.JobName) then return end
+    if not IsDriverOnDuty(source) or not IsTowDriver(source) then return end
     amount = tonumber(service.price or amount)
     if not amount or amount <= 0 then return end
     amount = math.min(math.floor(amount), Config.MaxBillAmount or 5000)

@@ -472,7 +472,7 @@ end, false)
 CreateThread(function()
     while true do
         local sleep = 500
-        if PlayerData.job and PlayerData.job.name == Config.JobName and AttachedVehicle then
+        if AttachedVehicle and TowJob.CanTow(PlayerData.job) then
             sleep = 0
             if IsControlJustPressed(0, 47) then -- 47 = G
                 DetachVehicle()

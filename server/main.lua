@@ -59,7 +59,7 @@ local function ValidateTowDriver(source)
     if not Player then return false, 'Invalid player' end
 
     local job = Player.PlayerData.job
-    if not job or job.name ~= Config.JobName then
+    if not TowJob.CanTow(job) then
         return false, 'Not a tow driver'
     end
 
@@ -79,7 +79,7 @@ function IsShopStaff(source)
     if not Player then return false end
     local job = Player.PlayerData.job
     if not job or job.onduty ~= true then return false end
-    return job.name == 'mechanic' or job.name == Config.JobName
+    return job.name == 'mechanic' or Config.TowJobs[job.name] ~= nil
 end
 exports('IsShopStaff', IsShopStaff)
 
@@ -114,9 +114,9 @@ local function GetPlayerJob(source)
 end
 
 -- Check if player is tow driver
-local function IsTowDriver(source)
+function IsTowDriver(source)
     local job = GetPlayerJob(source)
-    return job and job.name == Config.JobName
+    return TowJob.CanTow(job)
 end
 
 -- Get available tow drivers
@@ -475,7 +475,7 @@ lib.callback.register('dps-towjob:server:canClockIn', function(source, shopId)
     if not Player then return false, 'Player not found' end
 
     local job = Player.PlayerData.job
-    if job.name ~= Config.JobName then
+    if not TowJob.CanTow(job) then
         return false, 'Not a tow driver'
     end
 

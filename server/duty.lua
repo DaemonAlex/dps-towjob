@@ -13,7 +13,7 @@ RegisterNetEvent('dps-towjob:server:toggleDuty', function(shopId)
     if not Player then return end
 
     local job = Player.PlayerData.job
-    if job.name ~= Config.JobName then
+    if not TowJob.CanTow(job) then
         lib.notify(source, {
             title = 'Tow Job',
             description = 'You are not a tow driver',
@@ -166,7 +166,7 @@ exports('GetDriverState', GetDriverState)
 -- Sync with QBCore duty changes. A server-side handler only: as a net event any
 -- client could send another driver's id and knock them off duty.
 AddEventHandler('QBCore:Server:OnJobUpdate', function(source, job)
-    if job.name ~= Config.JobName then
+    if not TowJob.CanTow(job) then
         -- Player changed jobs, remove from duty tracker
         if DutyTracker[source] then
             DutyTracker[source] = nil

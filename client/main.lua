@@ -43,7 +43,7 @@ end)
 RegisterNetEvent('QBCore:Client:OnJobUpdate', function(job)
     PlayerData.job = job
 
-    if job.name ~= Config.JobName then
+    if not TowJob.CanTow(job) then
         -- No longer a tow driver
         IsOnDuty = false
         CurrentShop = nil
@@ -301,7 +301,7 @@ end)
 
 -- Key binding for tow menu (chat command only, F7 handled in thread below)
 RegisterCommand('towmenu', function()
-    if not PlayerData.job or PlayerData.job.name ~= Config.JobName then return end
+    if not TowJob.CanTow(PlayerData.job) then return end
 
     if not IsOnDuty then
         lib.notify({
