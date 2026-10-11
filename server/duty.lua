@@ -72,6 +72,17 @@ RegisterNetEvent('dps-towjob:server:toggleDuty', function(shopId)
             return
         end
 
+        -- City work licences (dps-services): no licence, no shift.
+        local missing = TowJob.MissingLicence(Player.PlayerData.metadata and Player.PlayerData.metadata.licences, Config.Licences.clockIn)
+        if missing then
+            lib.notify(source, {
+                title = 'Tow Job',
+                description = ('You need a city %s to clock in. Get it in the City Services app.'):format(Config.Licences.labels[missing] or missing),
+                type = 'error'
+            })
+            return
+        end
+
         TowJob.Debug('Driver clocking in at:', shopId)
 
         DutyTracker[source] = {

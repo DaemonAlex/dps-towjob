@@ -33,6 +33,22 @@ function TowJob.TowGrade(job)
     return gradeLevel(job) - Config.TowJobs[job.name]
 end
 
+--- Does this set of licences (Qbox metadata `licences`) hold id? Commercial A
+--- also counts as Commercial B, the same rule dps-services uses.
+function TowJob.HasLicence(have, id)
+    if type(have) ~= 'table' then return false end
+    if have[id] == true then return true end
+    return id == 'cdl_b' and have.cdl_a == true
+end
+
+--- The first licence in `needs` that is missing, or nil when all are held.
+function TowJob.MissingLicence(have, needs)
+    for _, id in ipairs(needs or {}) do
+        if not TowJob.HasLicence(have, id) then return id end
+    end
+    return nil
+end
+
 -- Format money
 function TowJob.FormatMoney(amount)
     return '$' .. string.format('%0.2f', amount)

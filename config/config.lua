@@ -22,6 +22,19 @@ Config.TowJobs = {
     sandymechanic = 1,
 }
 
+-- City work licences, earned in the City Services app (dps-services, Damon
+-- 2026-10-11). Clock-in needs all of clockIn; a truck listed in vehicles also
+-- needs that licence. cdl_a (Commercial A) also counts as cdl_b.
+Config.Licences = {
+    clockIn = { 'driver', 'cdl_b', 'tow' },
+    vehicles = {
+        towtruck2 = 'cdl_a', -- Tow Truck (Large)
+    },
+    labels = {
+        driver = 'driver licence', cdl_b = 'Commercial B', cdl_a = 'Commercial A', tow = 'Tow licence',
+    },
+}
+
 -- Payment settings
 Config.Payment = {
     baseRate = 100,         -- Base pay per tow
