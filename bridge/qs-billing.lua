@@ -1,43 +1,41 @@
 --[[
-    dps-towjob Bridge: qs-billing
-    Integration with Quasar Store billing system
+    dps-towjob Bridge: billing
+    Invoices go through wasabi_billing (2026-10-12). qs-billing had no CreateBill
+    export, so every bill sent through it failed without an error.
 ]]
 
--- Check if qs-billing is available
-local function HasQSBilling()
-    return GetResourceState('qs-billing') == 'started'
+local function HasWasabiBilling()
+    return GetResourceState('wasabi_billing') == 'started'
 end
 
--- Create a bill for tow services
+-- Create a bill for tow services. False = no invoice made; the caller then takes
+-- the money directly.
 function CreateTowBill(driverSource, customerSource, amount, description)
-    if not HasQSBilling() then
-        TowJob.Debug('qs-billing not available, skipping bill')
+    if not HasWasabiBilling() then
+        TowJob.Debug('wasabi_billing not running, no invoice')
         return false
     end
 
-    local driverCid = Bridge.GetIdentifier(driverSource)
     local customerCid = Bridge.GetIdentifier(customerSource)
-
-    if not driverCid or not customerCid then
+    if not customerCid then
         return false
     end
 
-    -- The bill pays the driver's own company (Camel Tow or their shop), not
-    -- the depot they clocked in at.
+    -- The bill is from the driver's own company (Camel Tow or their shop), not the
+    -- depot they clocked in at; wasabi_billing takes the issuing company from the
+    -- driver's job, which must be on its send list.
     local driver = Bridge.GetPlayer(driverSource)
     local driverJob = driver and driver.PlayerData.job
-    local societyName = TowJob.CanTow(driverJob) and driverJob.name or 'mechanic'
+    local invoiceType = TowJob.CanTow(driverJob) and 'society' or 'personal'
 
-    -- Create bill using qs-billing export
-    exports['qs-billing']:CreateBill({
-        sender = driverCid,
-        target = customerCid,
-        amount = amount,
-        description = description or 'Tow Service',
-        society = societyName
-    })
+    local reference = exports.wasabi_billing:CreateInvoice(driverSource, customerCid, amount,
+        (description or 'Tow Service'):sub(1, 200), invoiceType, 'personal')
+    if not reference then
+        TowJob.Debug('wasabi_billing refused the invoice', driverSource, customerSource, amount)
+        return false
+    end
 
-    TowJob.Debug('Bill created:', amount, 'from', driverSource, 'to', customerSource)
+    TowJob.Debug('Invoice created:', reference, amount, 'from', driverSource, 'to', customerSource)
     return true
 end
 
@@ -144,36 +142,21 @@ RegisterNetEvent('qs-billing:server:towRequest', function(data)
     })
 end)
 
--- Create invoice for impound release
+-- Impound release fee: taken directly (cash first, then bank). The owner pays it
+-- themselves, and a player cannot invoice themselves in wasabi_billing; the fee
+-- goes to the city, not a company.
 function CreateImpoundInvoice(source, amount, vehiclePlate)
-    if not HasQSBilling() then
-        -- Direct payment if no billing system
-        local cash = Bridge.GetMoney(source, 'cash')
-        if cash >= amount then
-            Bridge.RemoveMoney(source, 'cash', amount)
-            return true
-        end
-        local bank = Bridge.GetMoney(source, 'bank')
-        if bank >= amount then
-            Bridge.RemoveMoney(source, 'bank', amount)
-            return true
-        end
-        return false
+    local cash = Bridge.GetMoney(source, 'cash')
+    if cash >= amount then
+        Bridge.RemoveMoney(source, 'cash', amount)
+        return true
     end
-
-    local citizenid = Bridge.GetIdentifier(source)
-    if not citizenid then return false end
-
-    -- For impound, bill directly (no society, goes to city)
-    exports['qs-billing']:CreateBill({
-        sender = 'government',
-        target = citizenid,
-        amount = amount,
-        description = 'Impound Fee - ' .. vehiclePlate,
-        society = nil -- No society, goes to void/city
-    })
-
-    return true
+    local bank = Bridge.GetMoney(source, 'bank')
+    if bank >= amount then
+        Bridge.RemoveMoney(source, 'bank', amount)
+        return true
+    end
+    return false
 end
 
 exports('CreateImpoundInvoice', CreateImpoundInvoice)
@@ -221,12 +204,31 @@ end)
 
 -- Callback for checking if player has pending tow bills
 lib.callback.register('dps-towjob:server:hasPendingBills', function(source)
-    if not HasQSBilling() then return false end
+    if not HasWasabiBilling() then return false end
 
     local citizenid = Bridge.GetIdentifier(source)
     if not citizenid then return false end
 
-    -- This would need to check qs-billing's database
-    -- Implementation depends on qs-billing's available exports
+    -- Any unpaid or overdue tow/roadside invoice addressed to this character
+    for _, inv in ipairs(exports.wasabi_billing:GetInvoicesByIdentifier(citizenid) or {}) do
+        if inv.receiver_identifier == citizenid and (inv.status == 'unpaid' or inv.status == 'overdue')
+            and type(inv.reason) == 'string' and (inv.reason:find('Tow', 1, true) or inv.reason:find('Roadside', 1, true)) then
+            return true
+        end
+    end
     return false
 end)
+
+-- Server console only: which billing exports exist (both billing scripts are escrowed,
+-- so this is the only way to know). Calls each with no arguments inside pcall; a missing
+-- export fails with "No such export" before anything runs.
+RegisterCommand('towbillcheck', function(src)
+    if src ~= 0 then return end
+    for _, pair in ipairs({ { 'qs-billing', 'CreateBill' }, { 'qs-billing', 'CreateBillingForIdentifier' }, { 'wasabi_billing', 'CreateInvoice' } }) do
+        local res, name = pair[1], pair[2]
+        local ok, err = pcall(function() return exports[res][name]() end)
+        local missing = (not ok) and tostring(err):find('No such export', 1, true) ~= nil
+        print(('[dps-towjob] towbillcheck %s %s: %s'):format(res, name,
+            missing and 'MISSING' or ('present (' .. (ok and 'ran' or ('errored: ' .. tostring(err):sub(1, 120))) .. ')')))
+    end
+end, true)
