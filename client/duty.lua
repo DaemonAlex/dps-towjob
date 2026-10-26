@@ -21,7 +21,7 @@ CreateThread(function()
                         icon = 'fa-solid fa-clock',
                         distance = 2.0,
                         canInteract = function()
-                            return PlayerData.job and PlayerData.job.name == Config.JobName
+                            return TowJob.CanTow(PlayerData.job)
                         end,
                         onSelect = function()
                             TriggerServerEvent('dps-towjob:server:toggleDuty', shopId)
@@ -75,7 +75,7 @@ function OpenVehicleMenu(shopId)
     local shop = Config.ShopJobMapping[shopId]
     if not shop then return end
 
-    local grade = PlayerData.job.grade.level or 0
+    local grade = TowJob.TowGrade(PlayerData.job)
     local available = GetAvailableTowVehicles(grade)
 
     local options = {}

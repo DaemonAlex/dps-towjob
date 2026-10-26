@@ -12,8 +12,28 @@ Config.Debug = false
 -- Use ox_lib for UI
 Config.UseOxLib = true
 
--- Job name
-Config.JobName = 'tow'
+-- Jobs that take tow calls, and the rank each one starts towing at
+-- (Damon 2026-10-11: Camel Tow at every rank, the repair shops from Tow Driver).
+-- The old 'tow' job (City Tow) is not listed: Camel Tow replaced it.
+Config.TowJobs = {
+    cameltow = 0,
+    lscustoms = 1,
+    bayareacustoms = 1,
+    sandymechanic = 1,
+}
+
+-- City work licences, earned in the City Services app (dps-services, Damon
+-- 2026-10-11). Clock-in needs all of clockIn; a truck listed in vehicles also
+-- needs that licence. cdl_a (Commercial A) also counts as cdl_b.
+Config.Licences = {
+    clockIn = { 'driver', 'cdl_b', 'tow' },
+    vehicles = {
+        towtruck2 = 'cdl_a', -- Tow Truck (Large)
+    },
+    labels = {
+        driver = 'driver licence', cdl_b = 'Commercial B', cdl_a = 'Commercial A', tow = 'Tow licence',
+    },
+}
 
 -- Payment settings
 Config.Payment = {

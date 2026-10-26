@@ -109,6 +109,25 @@ function AddDriverEarning(source, shopId, amount)
     TowJob.Debug('Driver earning added:', citizenid, amount)
 end
 
+-- Pay the company's cut of a tow into the driver's own company account
+-- (Camel Tow or their shop). Society money lives in wasabi_banking, which
+-- answers the qb-management exports and logs the deposit. Damon 2026-10-11.
+-- GLOBAL so tests can reach it.
+function PayCompanyCut(source, amount)
+    amount = tonumber(amount)
+    if not amount or amount <= 0 then return false end
+    local job = Bridge.GetPlayerJob(source)
+    if not TowJob.CanTow(job) then return false end
+    local ok, paid = pcall(function()
+        return exports['qb-management']:AddMoney(job.name, math.floor(amount), 'Tow job cut')
+    end)
+    if not ok or paid ~= true then
+        TowJob.Debug('Company cut not paid', job.name, amount, tostring(paid))
+        return false
+    end
+    return true
+end
+
 -- Process payment for a completed job.
 -- C2: this is an INTERNAL function called only from completeJob (server/queue.lua).
 -- It is intentionally NOT a RegisterNetEvent — a client cannot invoke it, and
@@ -132,13 +151,16 @@ function ProcessPayment(source, job)
     -- Add driver's cut to their earnings (tracked in the DB ledger)
     AddDriverEarning(source, shopId, payment.driver)
 
+    local paidCompany = PayCompanyCut(source, payment.shop)
+
     -- Notify driver
     lib.notify(source, {
         title = 'Tow Completed',
         description = string.format(
-            'Earned %s (%.1f miles)\nShop cut: %s',
+            'Earned %s (%.1f miles)\n%s: %s',
             TowJob.FormatMoney(payment.driver),
             payment.distance,
+            paidCompany and 'Paid to your company' or 'Company cut not paid',
             TowJob.FormatMoney(payment.shop)
         ),
         type = 'success',

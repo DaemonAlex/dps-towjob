@@ -123,7 +123,7 @@ RegisterCommand('dispatch', function()
     -- DPS 2026-09-29 (Damon): silent for anyone who is not a tow driver. Police
     -- and EMS bind F6 to their own dispatch, so other players pressing F6 landed
     -- here and got an error for a job they do not have.
-    if not Bridge.HasJob(Config.JobName) then return end
+    if not TowJob.CanTow(PlayerData.job) then return end
     if not Bridge.IsOnDuty() then
         Bridge.Notify('Tow Job', 'Go on duty to open tow dispatch', 'error')
         return

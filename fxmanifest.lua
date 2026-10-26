@@ -81,8 +81,8 @@ ui_page 'ui/index.html'
 
 files {
     'locales/*.lua',
-    'ui/index.html',
-    'ui/styles/main.css',
+    'ui/index.html', 'ui/dps-logo.svg',
+    'ui/styles/main.css', 'ui/dps-look.css',
     'ui/js/utils.js',
     'ui/js/app.js',
 }
