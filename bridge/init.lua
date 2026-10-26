@@ -72,7 +72,8 @@ Bridge.Resources = {
                GetResourceState('ps-dispatch') == 'started' and 'ps-dispatch' or
                GetResourceState('cd_dispatch') == 'started' and 'cd_dispatch' or nil,
 
-    billing = GetResourceState('qs-billing') == 'started' and 'qs-billing' or
+    billing = GetResourceState('wasabi_billing') == 'started' and 'wasabi_billing' or
+              GetResourceState('qs-billing') == 'started' and 'qs-billing' or
               GetResourceState('qb-billing') == 'started' and 'qb-billing' or nil,
 
     management = GetResourceState('qbx_management') == 'started' and 'qbx_management' or

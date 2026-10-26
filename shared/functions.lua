@@ -11,6 +11,44 @@ function TowJob.Debug(...)
     end
 end
 
+local function gradeLevel(job)
+    local grade = job.grade
+    if type(grade) == 'table' then grade = grade.level end
+    return tonumber(grade)
+end
+
+--- Does this job (PlayerData.job) take tow calls? Tow duty is tracked
+--- separately, so this only answers the job and rank question.
+function TowJob.CanTow(job)
+    if type(job) ~= 'table' then return false end
+    local first = Config.TowJobs[job.name]
+    local level = gradeLevel(job)
+    return first ~= nil and level ~= nil and level >= first
+end
+
+--- Rank counted from where the job starts towing, so a shop Tow Driver gets
+--- the same trucks as a Camel Tow Trainee Driver.
+function TowJob.TowGrade(job)
+    if not TowJob.CanTow(job) then return 0 end
+    return gradeLevel(job) - Config.TowJobs[job.name]
+end
+
+--- Does this set of licences (Qbox metadata `licences`) hold id? Commercial A
+--- also counts as Commercial B, the same rule dps-services uses.
+function TowJob.HasLicence(have, id)
+    if type(have) ~= 'table' then return false end
+    if have[id] == true then return true end
+    return id == 'cdl_b' and have.cdl_a == true
+end
+
+--- The first licence in `needs` that is missing, or nil when all are held.
+function TowJob.MissingLicence(have, needs)
+    for _, id in ipairs(needs or {}) do
+        if not TowJob.HasLicence(have, id) then return id end
+    end
+    return nil
+end
+
 -- Format money
 function TowJob.FormatMoney(amount)
     return '$' .. string.format('%0.2f', amount)
