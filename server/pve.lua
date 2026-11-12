@@ -710,7 +710,7 @@ end)
 
 -- Alert police units (fallback when qs-dispatch not available)
 function AlertPoliceUnits(alertData)
-    local policeJobs = { 'police', 'bcso', 'sasp', 'rpd', 'rcso' } -- DPS 2026-09-25: patrol set
+    local policeJobs = { 'police', 'bcso', 'sasp' } -- DPS 2026-09-25: patrol set
 
     for _, playerId in ipairs(GetPlayers()) do
         local src = tonumber(playerId)

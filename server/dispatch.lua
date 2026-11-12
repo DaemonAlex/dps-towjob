@@ -43,7 +43,7 @@ RegisterNetEvent('dps-towjob:server:dispatchRequest', function(data)
     -- DPS 2026-09-25: job types from qbx_core (leo / ems) instead of vendor names
     if job.type == 'leo' or job.name == 'police' then
         jobType = TowJob.JobTypes.POLICE
-    elseif job.type == 'ems' or job.name == 'sams' or job.name == 'omc' or job.name == 'rmc' then
+    elseif job.type == 'ems' or job.name == 'sams' or job.name == 'lsmc' then
         jobType = TowJob.JobTypes.EMS
     end
 
