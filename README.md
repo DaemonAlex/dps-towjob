@@ -478,6 +478,10 @@ This project is licensed under the GPL-3.0 License.
 - **12 November 2026.** README: what it is for, how it works alone and with paid scripts, other DPS scripts.
 - **31 October 2026.** Police and medical job lists match the jobs DelPerroSands runs: `police`, `bcso` and `sasp` for police requests, `sams` and `lsmc` for medical. The Roxwood departments are removed. Edit the lists in `client/dispute.lua`, `server/dispatch.lua` and `server/pve.lua` if your job names differ.
 
+## Author
+
+Made by [DaemonAlex](https://github.com/DaemonAlex) for DelPerroSands.
+
 ## Other DPS scripts
 
 All of these are made for DelPerroSands and run together on one Qbox server. Each one works on
