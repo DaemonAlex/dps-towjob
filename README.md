@@ -64,6 +64,37 @@ A comprehensive, queue-based tow job system for FiveM with dispatch dashboard, j
 +-------------------------------------------------------------+
 ```
 
+## What it is for
+
+A tow job is usually one driver and a list of random cars. This runs towing as a service: calls
+go into a queue, drivers and mechanic shops get a fair share, and a broken-down player can ask
+for a tow and watch it come. When nobody is on duty, a city tow fills in, so a player is never
+stranded.
+
+## On its own, and with other scripts
+
+**On its own.** With `ox_lib`, `ox_target` and `oxmysql` on QBCore, Qbox or ESX: the queue, the
+dispatch dashboard, winching, three impound lots and NPC jobs. Payment goes straight to the
+driver.
+
+**With a paid mechanic script (jg-mechanic).** Tows are shared fairly between player-owned
+mechanic shops, and a towed car can be dropped at the shop that will repair it.
+
+**With a paid billing script (qs-billing, wasabi_billing).** The customer gets a proper invoice
+in place of a direct charge.
+
+**With a paid dispatch or police computer (wasabi_mdt, qs-dispatch).** Police can call a tow from
+their own tools, and tow drivers see police requests in the queue.
+
+**With [dps-services](https://github.com/DaemonAlex/dps-services) on a paid phone or tablet (lb-phone, lb-tablet).**
+Players request a tow from an app and follow the truck live on a map.
+
+**With [dps-parking](https://github.com/DaemonAlex/dps-parking).** Expired meters and overstayed
+cars become tow jobs.
+
+**With several inventories.** It works with ox_inventory, qs-inventory and qb-inventory, so it
+does not tie you to one.
+
 ## Dependencies
 
 ### Required
@@ -441,3 +472,36 @@ Tables are auto-created on resource start. See `sql/schema.sql` for the full sch
 ## License
 
 This project is licensed under the GPL-3.0 License.
+
+## Recent changes
+
+- **12 November 2026.** README: what it is for, how it works alone and with paid scripts, other DPS scripts.
+- **31 October 2026.** Police and medical job lists match the jobs DelPerroSands runs: `police`, `bcso` and `sasp` for police requests, `sams` and `lsmc` for medical. The Roxwood departments are removed. Edit the lists in `client/dispute.lua`, `server/dispatch.lua` and `server/pve.lua` if your job names differ.
+
+## Other DPS scripts
+
+All of these are made for DelPerroSands and run together on one Qbox server. Each one works on
+its own. The ones marked "pairs with" do more when both are running.
+
+| Script | What it does |
+|---|---|
+| [dps-inventory](https://github.com/DaemonAlex/dps-inventory) | The inventory: ox_inventory with equipment slots, backpacks, armour plates and a self status panel, in the DelPerroSands colours. |
+| [dps-medical](https://github.com/DaemonAlex/dps-medical) | Patient records, illness and diagnostic tests. A companion to wasabi_ambulance. Pairs with dps-inventory: symptoms and diagnoses show on the status panel. |
+| [dps-insurance](https://github.com/DaemonAlex/dps-insurance) | Ties m-Insurance into the MDT, impound, hospital and medical chart. Pairs with dps-medical. |
+| [dps-studio](https://github.com/DaemonAlex/dps-studio) | Build rooms, doors and portals in game from one panel (`/studio`), with owners and managers so staff do not have to support them. |
+| [dps-shops](https://github.com/DaemonAlex/dps-shops) | Shop clerks who greet and react to a robbery, then player-owned shops. |
+| [dps-fleet](https://github.com/DaemonAlex/dps-fleet) | Vehicle browser and workshop on one panel: extras, liveries and mods for emergency vehicles. |
+| [dps-parking](https://github.com/DaemonAlex/dps-parking) | Parking with valet, impound, violations and reserved spots. |
+| [dps-vehiclepersistence](https://github.com/DaemonAlex/dps-vehiclepersistence) | Vehicles stay where they were parked. Pairs with dps-parking. |
+| [dps-services](https://github.com/DaemonAlex/dps-services) | Request a tow and follow it live on the lb-phone and lb-tablet. Pairs with dps-towjob. |
+| [dps-autoshops](https://github.com/DaemonAlex/dps-autoshops) | Self-service repair shops when no mechanic is on duty. |
+| [dps-cityworker](https://github.com/DaemonAlex/dps-cityworker) | City infrastructure job and career. |
+| [dps-ainpcs](https://github.com/DaemonAlex/dps-ainpcs) | NPCs you can talk to, with trust, quests and intel. |
+| [dps-badpeds](https://github.com/DaemonAlex/dps-badpeds) | Police interaction with NPCs: stops, arrests, intel and jail records. |
+| [dps-gangwars](https://github.com/DaemonAlex/dps-gangwars) | Ambient gang NPCs, territory population and war reinforcements. |
+| [dps-rotations](https://github.com/DaemonAlex/dps-rotations) | Moves dealers, harvests and other spots on a fixed schedule. |
+| [dps-trains](https://github.com/DaemonAlex/dps-trains) | The train system. Pairs with dps-trains-stock, dps-traintools and dps-transitapp. |
+| [dps-transitapp](https://github.com/DaemonAlex/dps-transitapp) | Live train arrival boards on the lb-phone. |
+| [dps-faceplant](https://github.com/DaemonAlex/dps-faceplant) | City help, reports and staff tools on the lb-phone and lb-tablet. |
+| [dps-chat](https://github.com/DaemonAlex/dps-chat) | A command box for voice-only servers. No chat feed. |
+| [dps-filmmode](https://github.com/DaemonAlex/dps-filmmode) | One key hides every HUD layer and gives a smooth free camera for recording. |
