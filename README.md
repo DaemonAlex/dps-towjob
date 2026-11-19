@@ -477,6 +477,7 @@ This project is licensed under the GPL-3.0 License.
 
 ## Recent changes
 
+- **19 November 2026 (2.9.1).** Pay needs a real tow. The server finds the hooked vehicle itself, reads its plate, and pays only when that same vehicle is at the drop-off. A driver is never offered their own call. `/calltow` uses the caller's own position, needs a vehicle next to them, allows one open call and has a two minute wait. Police and medical tow requests need that job, on duty. A driver can only invoice the caller of their job, and when the invoice cannot be made nothing is charged (the old code took up to $5000 directly). Tows under 150 m pay nothing. Impounded vehicles are removed by the server.
 - **12 November 2026.** README: what it is for, how it works alone and with paid scripts, other DPS scripts.
 - **31 October 2026.** Police and medical job lists match the jobs DelPerroSands runs: `police`, `bcso` and `sasp` for police requests, `sams` and `lsmc` for medical. The Roxwood departments are removed. Edit the lists in `client/dispute.lua`, `server/dispatch.lua` and `server/pve.lua` if your job names differ.
 

@@ -40,6 +40,10 @@ function AddToQueue(request)
         commission = request.commission,
     }
 
+    -- A driver is never offered their own call. The declined list is keyed by
+    -- citizen id, so marking the caller there keeps the offer away from them.
+    if job.requesterId then job.declined[job.requesterId] = true end
+
     TowLifecycle.insertByPriority(TowQueue, job)
 
     TowJob.Debug('Job added to queue:', job.id, job.type)
@@ -175,6 +179,9 @@ RegisterNetEvent('dps-towjob:server:acceptJob', function(jobId)
         })
         return
     end
+    -- Only a freshly assigned job can be accepted. Without this a driver who is
+    -- already towing could step back to "on the way" and hook again.
+    if job.state ~= TowJob.JobState.ASSIGNED then return end
 
     job.state = TowJob.JobState.EN_ROUTE
 
@@ -263,6 +270,38 @@ function ChooseDestination(job, driverSource)
     return nil
 end
 
+local TowedRecently = {}   -- cleaned plate -> os.time() of the last paid tow
+local LastCustomer = {}    -- driver source -> { src = caller's server id, at = os.time() }
+
+--- Who this driver may invoice: the caller of the job they are on, or of the
+--- job they finished in the last ten minutes. Nobody else.
+function TowCustomerOf(driverSource)
+    local job = ActiveJobs[driverSource]
+    if job and job.requesterSource then return job.requesterSource end
+    local last = LastCustomer[driverSource]
+    if last and os.time() - last.at <= 600 then return last.src end
+    return nil
+end
+
+AddEventHandler('playerDropped', function() LastCustomer[source] = nil end)
+
+--- The towed vehicle as the server sees it. Coordinates of a vehicle that was
+--- hooked or let go a moment ago can lag, so this looks a few times before it
+--- gives up. Returns the entity when it is within maxDistance of coords.
+local function towedVehicleNear(netId, coords, maxDistance, tries)
+    if type(netId) ~= 'number' or netId <= 0 or netId > 65535 then return nil end
+    local at = vector3(coords.x, coords.y, coords.z)
+    for i = 1, tries do
+        local entity = NetworkGetEntityFromNetworkId(netId)
+        if entity and entity ~= 0 and DoesEntityExist(entity) and GetEntityType(entity) == 2
+            and #(GetEntityCoords(entity) - at) <= maxDistance then
+            return entity
+        end
+        if i < tries then Wait(500) end
+    end
+    return nil
+end
+
 -- Vehicle attached
 -- H2: this is the ONLY transition into TOWING, and completeJob requires TOWING.
 -- So this handler is server-authoritative about "the vehicle is really hooked":
@@ -293,7 +332,37 @@ RegisterNetEvent('dps-towjob:server:vehicleAttached', function(jobId, vehicleDat
         return
     end
 
-    local sentPlate = TowLifecycle.sanitizeLabel(vehicleData.plate, 10)
+    -- A real vehicle has to be on the hook. The server finds it by its network
+    -- id and reads the plate itself; the driver's client only says which one.
+    if job.attaching then return end
+    job.attaching = true
+    local netId = tonumber(vehicleData.netId)
+    local entity = towedVehicleNear(netId, job.pickupCoords, 30.0, 5)
+    job.attaching = nil
+    if ActiveJobs[source] ~= job or job.state ~= s then return end
+    if not entity then
+        Bridge.Notify(source, 'Tow', 'The server cannot see a vehicle on your hook at the pickup. Hook it again.', 'error')
+        TowJob.Debug('Rejected vehicleAttached: no vehicle at pickup', source, jobId)
+        return
+    end
+    for model in pairs(Config.TowVehicles) do
+        if GetEntityModel(entity) == joaat(model) then
+            Bridge.Notify(source, 'Tow', 'A tow truck cannot be the vehicle on the call.', 'error')
+            return
+        end
+    end
+    local realPlate = TowLifecycle.sanitizeLabel(GetVehicleNumberPlateText(entity), 10)
+    local plateKey = TowLifecycle.cleanPlate(realPlate) or 'NOPLATE'
+    if not job.kind then
+        local last = TowedRecently[plateKey]
+        if last and os.time() - last < (Config.Towing.sameVehicleWaitSec or 1800) then
+            Bridge.Notify(source, 'Tow', 'That vehicle was towed a short while ago. It cannot be the vehicle on this call.', 'error')
+            return
+        end
+    end
+    job.towNetId = netId
+
+    local sentPlate = realPlate
     if job.kind then
         -- A player request keeps what the server recorded when it was made.
         -- The driver's client may only confirm it is the same vehicle.
@@ -334,8 +403,13 @@ end)
 RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
     local source = source
 
-    -- Anti-spam check
-    if CheckCooldown(source, 'completeJob') then return end
+    -- Anti-spam check. The client has already let the vehicle go, so tell it to
+    -- keep hold of the job and try again.
+    if CheckCooldown(source, 'completeJob') then
+        TriggerClientEvent('dps-towjob:client:dropoffRefused', source)
+        lib.notify(source, { title = 'Tow Job', description = 'Wait a few seconds, then finish the drop-off again.', type = 'inform' })
+        return
+    end
 
     local job = ActiveJobs[source]
     if not job or job.id ~= jobId then return end
@@ -360,7 +434,27 @@ RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
         return
     end
 
+    -- The vehicle that was hooked has to be at the drop-off too, not only the
+    -- driver. This is what stops pay for a tow that never happened.
+    if job.completing then return end
+    job.completing = true
+    local towed = towedVehicleNear(job.towNetId, job.destination.coords, 35.0, 8)
+    job.completing = nil
+    if ActiveJobs[source] ~= job or job.state ~= TowJob.JobState.TOWING then return end
+    if not towed then
+        lib.notify(source, {
+            title = 'Tow Job',
+            description = 'The towed vehicle is not at the drop-off. Bring it here, then finish the job.',
+            type = 'error'
+        })
+        TriggerClientEvent('dps-towjob:client:dropoffRefused', source, job.towNetId)
+        TowJob.Debug('Rejected completeJob: towed vehicle not at destination', source, jobId)
+        return
+    end
+
     job.state = TowJob.JobState.COMPLETED
+    TowedRecently[TowLifecycle.cleanPlate(job.vehiclePlate) or 'NOPLATE'] = os.time()
+    if job.requesterSource then LastCustomer[source] = { src = job.requesterSource, at = os.time() } end
     if job.kind and job.feeCharged and (job.fee or 0) > 0 then
         local driverShop = GetDriverShop(source)
         if driverShop then AddToShopFund(driverShop, job.fee, 'Tow fee ' .. job.id) end
@@ -375,6 +469,14 @@ RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
     local distance = TowJob.CalculateDistance(job.pickupCoords, job.destination.coords)
     local isPve = job.type == TowJob.JobTypes.PVE
     local totalPayment = TowJob.CalculatePayment(distance, isPve)
+    -- A tow of a few metres is not a tow. Calls from the City Services app are
+    -- paid for by the caller's fee, so this only covers the other kinds.
+    local metres = #(vector3(job.pickupCoords.x, job.pickupCoords.y, job.pickupCoords.z)
+        - vector3(job.destination.coords.x, job.destination.coords.y, job.destination.coords.z))
+    if not job.kind and metres < (Config.Towing.minPaidMetres or 150.0) then
+        totalPayment = 0
+        lib.notify(source, { title = 'Tow Job', description = 'Too short a tow to be paid.', type = 'inform' })
+    end
     local driverCut, shopCut = TowJob.SplitPayment(totalPayment)
 
     -- Bonus for high rating drivers (luxury tier unlocked at 120+)
@@ -425,6 +527,12 @@ RegisterNetEvent('dps-towjob:server:completeJob', function(jobId)
 
     -- Clear active job
     ActiveJobs[source] = nil
+
+    -- A vehicle taken to an impound lot leaves the world here, on the server,
+    -- once the job is paid. The driver's client no longer deletes it.
+    if job.destination.type == TowJob.DestinationType.IMPOUND and DoesEntityExist(towed) then
+        DeleteEntity(towed)
+    end
 
     -- Update driver state
     if DutyTracker[source] then

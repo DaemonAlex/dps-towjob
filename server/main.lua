@@ -31,6 +31,9 @@ local COOLDOWN_TIMES = {
     ['cancelJob'] = 30000,         -- 30 seconds between cancellations
     ['toggleDuty'] = 5000,         -- 5 seconds between duty toggles
     ['collectEarnings'] = 60000,   -- 1 minute between earnings collections
+    ['customerRequest'] = 120000,  -- 2 minutes between /calltow requests
+    ['dispatchRequest'] = 30000,   -- 30 seconds between police / medical requests
+    ['billCustomer'] = 10000,      -- 10 seconds between invoices
 }
 
 -- Check if event is on cooldown (anti-spam)

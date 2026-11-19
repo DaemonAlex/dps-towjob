@@ -20,6 +20,7 @@ local lib = lib
 
 -- Local state
 local AttachedVehicle = nil
+local LastDropped = nil   -- the vehicle let go at the last drop-off
 local IsAttaching = false
 local TowRope = nil
 local WinchActive = false
@@ -200,10 +201,13 @@ local function AttachVehicleInternal(towVehicle, targetVehicle)
     AttachedVehicle = targetVehicle
 
     -- Use State Bag instead of TriggerServerEvent for sync
-    LocalPlayer.state:set('towingVehicle', NetworkGetNetworkIdFromEntity(targetVehicle), true)
+    local towedNet = NetworkGetEntityIsNetworked(targetVehicle) and NetworkGetNetworkIdFromEntity(targetVehicle) or 0
+    LocalPlayer.state:set('towingVehicle', towedNet, true)
 
     if CurrentJob then
+        -- The server finds the vehicle by this id and checks it itself.
         TriggerServerEvent('dps-towjob:server:vehicleAttached', CurrentJob.id, {
+            netId = towedNet,
             plate = plate,
             model = model,
             location = location
@@ -388,8 +392,9 @@ function CompleteDropoff(destinationId, destinationType)
     local plate = GetVehicleNumberPlateText(detachedVehicle)
 
     if destinationType == TowJob.DestinationType.IMPOUND then
+        -- The server removes the vehicle once it has seen it at the lot.
         TriggerServerEvent('dps-towjob:server:impoundVehicle', plate, destinationId)
-        DeleteEntity(detachedVehicle)
+        SetVehicleDoorsLocked(detachedVehicle, 2)
     else
         -- The server writes the ticket from its own record of the job.
         TriggerServerEvent('dps-towjob:server:createServiceTicket', destinationId)
@@ -397,8 +402,17 @@ function CompleteDropoff(destinationId, destinationType)
         SetVehicleHandbrake(detachedVehicle, true)
     end
 
+    LastDropped = detachedVehicle
     TriggerServerEvent('dps-towjob:server:completeJob', CurrentJob.id)
 end
+
+-- The server did not see the vehicle at the drop-off. Put it back in the
+-- driver's hands so the drop-off can be tried again once it really is there.
+RegisterNetEvent('dps-towjob:client:dropoffRefused', function()
+    if CurrentJob and LastDropped and DoesEntityExist(LastDropped) and not AttachedVehicle then
+        AttachedVehicle = LastDropped
+    end
+end)
 
 -- DYNAMIC THREADING: Speed limit warning while towing
 CreateThread(function()
