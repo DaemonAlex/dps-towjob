@@ -20,7 +20,7 @@ lua54 'yes'
 name 'dps-towjob'
 author 'DPS Development (Base: QBCore Team)'
 description 'Queue-based tow job system with jg-mechanic integration'
-version '2.9.0'
+version '2.9.1'
 
 shared_scripts {
     '@ox_lib/init.lua',

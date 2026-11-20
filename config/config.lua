@@ -46,6 +46,8 @@ Config.Payment = {
 
 -- Max amount a driver may bill/charge a customer in one invoice (server clamp).
 Config.MaxBillAmount = 5000
+-- A driver can only invoice the person who called the tow they are on. If the
+-- invoice cannot be made, nothing is charged.
 
 -- Max distance (metres) between driver and customer for a bill to be valid.
 Config.MaxBillDistance = 20.0
@@ -64,6 +66,8 @@ Config.Towing = {
     attachDistance = 5.0,   -- Distance to attach vehicle
     maxTowDistance = 10.0,  -- Max distance while towing
     speedLimit = 50.0,      -- Speed limit while towing (mph)
+    minPaidMetres = 150.0,  -- a tow shorter than this pays nothing (app requests are not affected)
+    sameVehicleWaitSec = 1800, -- the same vehicle cannot be the tow on another call for this long
 }
 
 -- Roadside services (driver can perform)

@@ -8,8 +8,8 @@ local function HasWasabiBilling()
     return GetResourceState('wasabi_billing') == 'started'
 end
 
--- Create a bill for tow services. False = no invoice made; the caller then takes
--- the money directly.
+-- Create a bill for tow services. False = no invoice made. Money is never taken
+-- directly: no invoice means no charge.
 function CreateTowBill(driverSource, customerSource, amount, description)
     if not HasWasabiBilling() then
         TowJob.Debug('wasabi_billing not running, no invoice')
@@ -43,8 +43,9 @@ exports('CreateTowBill', CreateTowBill)
 
 -- Bill customer for service
 -- H4: gate on an on-duty tow driver, validate the target is a real, nearby,
--- online player, and clamp the amount to config. Sender/amount are never
--- trusted blindly. Works with or without qs-billing (direct-pay fallback).
+-- online player, and clamp the amount to config. The only person a driver can
+-- bill is the caller of the job they are on (or finished in the last ten
+-- minutes). The bill is always an invoice the customer pays themselves.
 RegisterNetEvent('dps-towjob:server:billCustomer', function(customerSource, amount, description)
     local source = source
 
@@ -68,6 +69,11 @@ RegisterNetEvent('dps-towjob:server:billCustomer', function(customerSource, amou
         TowJob.Debug('No customer to bill')
         return
     end
+    if customerSource == source or TowCustomerOf(source) ~= customerSource then
+        lib.notify(source, { title = 'Bill', description = 'You can only bill the person who called this tow', type = 'error' })
+        return
+    end
+    if CheckCooldown(source, 'billCustomer') then return end
     if not Bridge.GetPlayer(customerSource) then
         TowJob.Debug('billCustomer rejected: target not online', customerSource)
         return
@@ -101,45 +107,10 @@ RegisterNetEvent('dps-towjob:server:billCustomer', function(customerSource, amou
             type = 'inform'
         })
     else
-        -- Fallback: no billing resource — settle directly. Charge the customer
-        -- (cash then bank) and pay the driver. Amount already clamped above.
-        local custCash = Bridge.GetMoney(customerSource, 'cash')
-        local custBank = Bridge.GetMoney(customerSource, 'bank')
-        local payType = custCash >= amount and 'cash' or (custBank >= amount and 'bank' or nil)
-
-        if not payType then
-            lib.notify(source, { title = 'Bill', description = 'Customer cannot afford this', type = 'error' })
-            lib.notify(customerSource, { title = 'Bill', description = 'You cannot afford the tow charge', type = 'error' })
-            return
-        end
-
-        Bridge.RemoveMoney(customerSource, payType, amount)
-        Bridge.AddMoney(source, 'bank', amount)
-
-        lib.notify(source, {
-            title = 'Payment Received',
-            description = string.format('%s for %s', TowJob.FormatMoney(amount), description or 'service'),
-            type = 'success'
-        })
-        lib.notify(customerSource, {
-            title = 'Charged',
-            description = string.format('Tow service: %s', TowJob.FormatMoney(amount)),
-            type = 'inform'
-        })
-        TowJob.Debug('Direct-pay fallback settled:', source, customerSource, amount)
+        -- No invoice, no charge. The old code took the money straight from the
+        -- customer here; that is gone.
+        lib.notify(source, { title = 'Bill', description = 'The invoice could not be sent. Nothing was charged.', type = 'error' })
     end
-end)
-
--- Handle tow request from billing/service ticket
-RegisterNetEvent('qs-billing:server:towRequest', function(data)
-    local source = source
-
-    TriggerEvent('dps-towjob:server:dispatchRequest', {
-        coords = data.coords or GetEntityCoords(GetPlayerPed(source)),
-        plate = data.plate,
-        model = data.model,
-        street = data.street
-    })
 end)
 
 -- Impound release fee: taken directly (cash first, then bank). The owner pays it
@@ -194,6 +165,8 @@ RegisterNetEvent('dps-towjob:server:roadsideBill', function(customerSource, serv
     amount = math.min(math.floor(amount), Config.MaxBillAmount or 5000)
     local target = tonumber(customerSource)
     if not target or not GetPlayerName(target) then return end
+    if target == source or TowCustomerOf(source) ~= target then return end
+    if CheckCooldown(source, 'billCustomer') then return end
     local dPed, cPed = GetPlayerPed(source), GetPlayerPed(target)
     if dPed == 0 or cPed == 0 then return end
     if #(GetEntityCoords(dPed) - GetEntityCoords(cPed)) > (Config.MaxBillDistance or 20.0) then return end
